@@ -362,6 +362,8 @@ const drop=$('#tgtDrop');
 ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)tgtLoadFile(f)});
+let serverOcr=true;
+fetch('/api/v1/ping').then(r=>r.json()).then(j=>{serverOcr=j.ocr!==false;if(!serverOcr){$('#tgtPhotoNote').innerHTML='<span style="color:var(--accent)">OCR reader not installed on this server</span> (no "ocr" folder next to the exe — run make_ocr_pack.bat). HHT photos are read on the device instead.';}}).catch(()=>{});
 async function tgtLoadPhoto(file){
   const zone=$('#tgtPhoto'), note=$('#tgtPhotoNote'), old=note.innerHTML;
   zone.classList.add('busy'); note.textContent='Reading the sheet… (a few seconds)';

@@ -20,6 +20,7 @@ import asyncio
 import csv
 import io
 import json
+import logging
 import socket
 import sys
 import threading
@@ -34,14 +35,36 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Res
 from pydantic import BaseModel, Field
 
 import db
-import countsheet
 
-SERVER_VERSION = "1.4.0"
+SERVER_VERSION = "1.4.1"
 # When frozen into an .exe (PyInstaller), config/data/log live NEXT TO THE
 # EXE (so they survive upgrades and are easy to find), while bundled
 # resources (static/) are unpacked into a temp dir exposed as sys._MEIPASS.
 FROZEN = getattr(sys, "frozen", False)
 BASE = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
+
+# ---- OCR engine lives OUTSIDE the exe (folder "ocr" next to it, made by
+# make_ocr_pack.bat). Keeps the exe identical in nature to v1.3.x, which the
+# antivirus accepts; the OCR DLLs are plain signed libraries beside it.
+OCR_DIR = BASE / "ocr"
+if OCR_DIR.is_dir() and str(OCR_DIR) not in sys.path:
+    sys.path.append(str(OCR_DIR))
+_countsheet = None
+_countsheet_error = None
+
+
+def get_countsheet():
+    """Import the OCR module on first use; None (with a reason) if unavailable."""
+    global _countsheet, _countsheet_error
+    if _countsheet is None and _countsheet_error is None:
+        try:
+            import countsheet as cs  # noqa: WPS433
+            cs._engine()             # loads the models now, so the first photo is not slow
+            _countsheet = cs
+        except Exception as e:  # noqa: BLE001
+            _countsheet_error = f"{type(e).__name__}: {e}"
+            logging.getLogger("phystock").warning("OCR engine not available: %s (folder %s)", _countsheet_error, OCR_DIR)
+    return _countsheet
 RES = Path(getattr(sys, "_MEIPASS", BASE)) if FROZEN else BASE
 CONFIG_PATH = BASE / "config.json"
 DEFAULT_CONFIG = {
@@ -240,6 +263,7 @@ def ping():
     return {
         "ok": True, "serverName": CONFIG["serverName"], "serverVersion": SERVER_VERSION,
         "serverTime": db.now_iso(), "stocktake": st, "requiresApiKey": bool(CONFIG.get("apiKey")),
+        "ocr": get_countsheet() is not None,
     }
 
 
@@ -369,6 +393,9 @@ async def count_sheet_ocr(request: Request, image: UploadFile = File(...), devic
     The sheet (photo + extracted rows) is kept for audit; nothing is applied
     until /count-sheet/apply after the operator has reviewed the table."""
     check_key(x_api_key)
+    countsheet = get_countsheet()
+    if countsheet is None:
+        raise HTTPException(status_code=503, detail=f"OCR reader is not installed on this server (no 'ocr' folder next to the exe). {_countsheet_error or ''}".strip())
     data = await image.read()
     if not data or len(data) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image missing or larger than 20 MB")

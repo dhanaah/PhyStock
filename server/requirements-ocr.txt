@@ -1,0 +1,7 @@
+# OCR engine for the count-sheet photo feature. Kept OUT of the exe so the
+# exe stays the same kind of file Apex One already accepts; installed into an
+# "ocr" folder next to the exe (see build_exe.bat / make_ocr_pack.bat).
+rapidocr>=3.4
+onnxruntime>=1.17
+numpy
+Pillow>=10

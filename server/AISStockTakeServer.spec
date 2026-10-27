@@ -1,26 +1,23 @@
 # PyInstaller spec — build with build_exe.bat (or: pyinstaller AISStockTakeServer.spec)
 # -*- mode: python ; coding: utf-8 -*-
 import sys
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_submodules
 
 hidden = (
     collect_submodules("uvicorn")
     + collect_submodules("pystray")
-    + collect_submodules("rapidocr")
-    + collect_submodules("onnxruntime")
-    + ["PIL.Image", "PIL.ImageDraw", "qrcode", "qrcode.image.svg", "tkinter", "tkinter.simpledialog",
+    + ["countsheet", "PIL.Image", "PIL.ImageDraw", "qrcode", "qrcode.image.svg", "tkinter", "tkinter.simpledialog",
        "anyio._backends._asyncio", "sqlite3"]
 )
 
 a = Analysis(
     ["server.py"],
     pathex=["."],
-    datas=[("static", "static"), ("tray.png", ".")] + collect_data_files("rapidocr"),
-    binaries=collect_dynamic_libs("onnxruntime"),
+    datas=[("static", "static"), ("tray.png", ".")],
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["matplotlib", "numpy", "scipy", "pandas", "IPython", "jupyter"],
+    excludes=["matplotlib", "numpy", "scipy", "pandas", "IPython", "jupyter", "rapidocr", "onnxruntime", "cv2"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

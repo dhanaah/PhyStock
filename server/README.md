@@ -1,4 +1,4 @@
-# AIS PhyStock Server (Data Center) — v1.4.0
+# AIS PhyStock Server (Data Center) — v1.4.1
 
 The one PC on the warehouse network that every scanner pushes to. Receives
 each scan the moment it is logged, ACKs it with a receipt number, shows a
@@ -48,7 +48,12 @@ Upgrading = copy the new `server.py`, `db.py` and `static\` over the old
 ones. The tray's *Quit (admin PIN)* prompt in this mode is a small
 PowerShell form (the embeddable runtime has no tkinter) — same behaviour.
 
-## Option A2 — exe build (if your antivirus allows it)
+## Option A2 — exe build
+
+`build_exe.bat` → `dist\AISPhyStockServer\` (exe + `_internal` + `ocr`).
+Copy that **whole folder** to the data-center PC. The exe itself contains
+no OCR code (that's the part the antivirus objected to in 1.4.0); the
+reader lives in the `ocr` sub-folder and is optional.
 
 `build_exe.bat` → `dist\AISPhyStockServer\` (folder with the exe; the
 single-file form was dropped because it is the one AV heuristics dislike
@@ -188,6 +193,15 @@ the app, or include it in the setup QR by regenerating it — the dashboard
 QR includes the key automatically if set).
 
 ## Changelog
+
+- **1.4.1** — **OCR engine moved out of the exe.** Apex One accepted the
+  v1.3.x exe but quarantined v1.4.0's, whose body carried onnxruntime /
+  OpenCV / numpy. The exe is now built exactly like 1.3.x; the OCR engine
+  is installed into an `ocr` folder beside it (`make_ocr_pack.bat`, run
+  automatically by `build_exe.bat`) and loaded at start-up. Without that
+  folder the server runs normally, `/ping` reports `ocr:false`, the
+  dashboard says so, and the HHT reads photos on the device. New
+  `requirements-ocr.txt`; `requirements.txt` back to the core set.
 
 - **1.4.0** — **Count sheet from a photo.** New OCR endpoint
   (`countsheet.py`, RapidOCR) reads a photographed/scanned bay count sheet

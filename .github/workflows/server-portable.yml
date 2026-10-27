@@ -49,7 +49,7 @@ jobs:
           if ($LASTEXITCODE) { throw "get-pip failed" }
           Remove-Item get-pip.py
           "[4/5] Installing server packages"
-          & "$PYDIR/python.exe" -m pip install --no-warn-script-location -r requirements.txt
+          & "$PYDIR/python.exe" -m pip install --no-warn-script-location -r requirements.txt -r requirements-ocr.txt
           if ($LASTEXITCODE) { throw "pip install failed" }
           "[5/5] Copying server files"
           Copy-Item server.py,db.py,countsheet.py,tray.png,icon.ico,README.md $OUT

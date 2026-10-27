@@ -2,9 +2,6 @@ fastapi>=0.110
 uvicorn>=0.29
 pydantic>=2
 qrcode>=7.4
-rapidocr>=3.4
-onnxruntime>=1.17
 python-multipart>=0.0.9
 Pillow>=10
-numpy
 pystray>=0.19 ; sys_platform == "win32"

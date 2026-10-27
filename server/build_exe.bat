@@ -38,12 +38,16 @@ if not exist icon.ico "%VPY%" make_icon.py
 echo Building exe (this takes 1-3 minutes) ...
 "%VPY%" -m PyInstaller --noconfirm --clean AISStockTakeServer.spec || (echo BUILD FAILED & pause & exit /b 1)
 
+echo Installing OCR engine beside the exe (dist\AISPhyStockServer\ocr) ...
+call make_ocr_pack.bat dist\AISPhyStockServer\ocr nopause || echo OCR pack failed - server still works, HHT reads photos on the device.
+
 echo.
 echo ==========================================================
-echo  Built:  %~dp0dist\AISPhyStockServer.exe
-echo  Deploy: copy ONLY that exe to the data-center PC, in its
-echo          own folder (e.g. D:\AISStockTakeServer\). On first
-echo          run it creates config.json, data\ and server.log
-echo          next to itself.
+echo  Built:  %~dp0dist\AISPhyStockServer\AISPhyStockServer.exe
+echo  Deploy: copy the WHOLE dist\AISPhyStockServer folder to the
+echo          data-center PC (exe + _internal + ocr). On first run it
+echo          creates config.json, data\ and server.log next to the exe.
+echo          The "ocr" folder is the photo count-sheet reader; without
+echo          it the server still runs and the HHT reads on the device.
 echo ==========================================================
 pause
