@@ -1,0 +1,51 @@
+name: Build Server (portable)
+
+# Builds the AIS PhyStock Server PORTABLE folder on a Windows runner:
+# official python.org runtime + all pip packages (incl. OCR models) + server
+# files. No custom EXE (nothing for Apex One to quarantine), nothing to
+# install on the data-center PC, no internet needed there.
+#
+#  • "Run workflow" button        → portable folder as a workflow artifact
+#  • push to main touching server → same, automatically
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/server-portable.yml']
+  workflow_dispatch:
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read server version
+        id: ver
+        shell: bash
+        run: echo "version=$(grep -oP 'SERVER_VERSION = \"\K[0-9.]+' server/server.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Build portable folder
+        shell: cmd
+        working-directory: server
+        env:
+          CI: "true"
+        run: make_portable.bat
+
+      - name: Smoke test (starts, answers /ping, stops)
+        shell: pwsh
+        working-directory: server/portable/AISPhyStockServer
+        run: |
+          $p = Start-Process -FilePath "python\python.exe" -ArgumentList "server.py","--no-tray","--port","8799" -PassThru -NoNewWindow
+          Start-Sleep -Seconds 12
+          try { $r = Invoke-RestMethod http://127.0.0.1:8799/api/v1/ping; "ping ok: server $($r.serverVersion)" }
+          catch { "ping FAILED: $_"; Stop-Process -Id $p.Id -Force; exit 1 }
+          Stop-Process -Id $p.Id -Force
+
+      - name: Upload portable folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: AISPhyStock-Server-portable-v${{ steps.ver.outputs.version }}
+          path: server/portable/AISPhyStockServer
+          retention-days: 90

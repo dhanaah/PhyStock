@@ -10,16 +10,17 @@ REM  Needs internet once (python.org + PyPI). No admin rights required.
 REM ============================================================================
 setlocal
 cd /d "%~dp0"
+if "%CI%"=="true" (set PAUSE=rem) else (set PAUSE=pause)
 set PYVER=3.12.8
 set OUT=portable\AISPhyStockServer
 set PYDIR=%OUT%\python
 
 if exist "%OUT%" rmdir /s /q "%OUT%"
-mkdir "%PYDIR%" || (echo cannot create %OUT% & pause & exit /b 1)
+mkdir "%PYDIR%" || (echo cannot create %OUT% & %PAUSE% & exit /b 1)
 
 echo [1/5] Downloading Python %PYVER% embeddable runtime ...
-curl -L -# -o python-embed.zip https://www.python.org/ftp/python/%PYVER%/python-%PYVER%-embed-amd64.zip || (echo download failed - check network/proxy & pause & exit /b 1)
-powershell -NoProfile -Command "Expand-Archive -Force -Path 'python-embed.zip' -DestinationPath '%PYDIR%'" || (echo unzip failed & pause & exit /b 1)
+curl -L -# -o python-embed.zip https://www.python.org/ftp/python/%PYVER%/python-%PYVER%-embed-amd64.zip || (echo download failed - check network/proxy & %PAUSE% & exit /b 1)
+powershell -NoProfile -Command "Expand-Archive -Force -Path 'python-embed.zip' -DestinationPath '%PYDIR%'" || (echo unzip failed & %PAUSE% & exit /b 1)
 del python-embed.zip
 
 echo [2/5] Enabling site-packages in the embeddable runtime ...
@@ -28,12 +29,12 @@ for %%f in ("%PYDIR%\python*._pth") do (
 )
 
 echo [3/5] Installing pip ...
-curl -L -s -o get-pip.py https://bootstrap.pypa.io/get-pip.py || (echo get-pip download failed & pause & exit /b 1)
-"%PYDIR%\python.exe" get-pip.py --no-warn-script-location -q || (echo pip install failed & pause & exit /b 1)
+curl -L -s -o get-pip.py https://bootstrap.pypa.io/get-pip.py || (echo get-pip download failed & %PAUSE% & exit /b 1)
+"%PYDIR%\python.exe" get-pip.py --no-warn-script-location -q || (echo pip install failed & %PAUSE% & exit /b 1)
 del get-pip.py
 
 echo [4/5] Installing server packages ...
-"%PYDIR%\python.exe" -m pip install -q --no-warn-script-location -r requirements.txt || (echo package install failed - check network/proxy & pause & exit /b 1)
+"%PYDIR%\python.exe" -m pip install -q --no-warn-script-location -r requirements.txt || (echo package install failed - check network/proxy & %PAUSE% & exit /b 1)
 
 echo [5/5] Copying server files ...
 copy /y server.py "%OUT%\" >nul
@@ -62,4 +63,4 @@ echo  Copy that whole folder to the data-center PC and run
 echo  "AIS PhyStock Server.bat"  (tray icon, no window).
 echo  Firewall rule for IT names:  ...\AISPhyStockServer\python\pythonw.exe
 echo ==========================================================
-pause
+%PAUSE%
