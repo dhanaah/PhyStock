@@ -9,9 +9,10 @@ export default function AdminPinModal({ visible, title, message, onConfirm, onCa
 
   const submit = () => {
     if (pin === ADMIN_PIN) {
+      const entered = pin;
       setPin('');
       setError(false);
-      onConfirm();
+      onConfirm(entered);
     } else {
       setError(true);
     }

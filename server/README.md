@@ -1,4 +1,4 @@
-# AIS PhyStock Server (Data Center) — v1.3.1
+# AIS PhyStock Server (Data Center) — v1.4.0
 
 The one PC on the warehouse network that every scanner pushes to. Receives
 each scan the moment it is logged, ACKs it with a receipt number, shows a
@@ -144,6 +144,27 @@ row optional; *Template* downloads an example). Admin PIN required. Every linked
 shows progress exactly as before. While linked, the per-device target
 editor is hidden — the server is the master.
 
+### From a photo of the count sheet (OCR)
+
+The physical count is usually written on paper first. Instead of typing it:
+
+- **Dashboard:** *Edit targets* → **From photo** — drop a photo/scan of the
+  sheet. It is read into the table; rows the reader was not sure about
+  are **red** and must be corrected or removed before *Save* is allowed.
+- **HHT:** *Reports → Bay progress → Photo count sheet → targets* — take the
+  photo on the device; it is read on the server (falls back to the
+  device's own reader if the server is unreachable), reviewed on the
+  device, then applied with the admin PIN.
+- **Print sheet** (in the editor) opens a printable template with the bays
+  pre-printed and one box per digit — this reads most reliably. A neat
+  handwritten `BAY  COUNT` list (e.g. `A01  120`) also works.
+
+Every photo and what was read from it is kept under `data/sheets/` and
+listed in the dashboard's **Count sheets** card for audit, with whether it
+was applied. The reader is RapidOCR (ONNX, pip-only — no extra programs to
+install and nothing for the antivirus to block). First read after start-up
+takes a few seconds while the model loads.
+
 ## API (for anything else you want to integrate)
 
 | Method | Path | Notes |
@@ -153,6 +174,10 @@ editor is hidden — the server is the master.
 | POST | `/api/v1/heartbeat` | device presence → `bayTargets` |
 | GET | `/api/v1/stats`, `/devices`, `/scans?limit=`, `/stocktakes`, `/bay-targets` | dashboard data |
 | PUT | `/api/v1/bay-targets` | `{pin, targets:{A01:120}, replace}` |
+| POST | `/api/v1/count-sheet/ocr` | multipart `image` (+ deviceId/deviceName/user/warehouse) → `{sheetId, rows:[{bay,count,confidence,needsReview,raw}]}` |
+| POST | `/api/v1/count-sheet/apply` | `{pin, sheetId, rows:[{bay,count}], replace}` → targets (audited) |
+| GET | `/api/v1/count-sheets`, `/count-sheets/{id}/image?thumb=1` | audit list + stored photo |
+| GET | `/print/count-sheet?bays=A01-A20,B01&warehouse=` | printable count-sheet template |
 | POST | `/api/v1/admin/new-stocktake` | `{pin, name}` |
 | GET | `/api/v1/export.csv?stocktake_id=` | CSV, oldest first, Excel-ready |
 | GET | `/api/v1/events` | server-sent events (dashboard live feed) |
@@ -163,6 +188,15 @@ the app, or include it in the setup QR by regenerating it — the dashboard
 QR includes the key automatically if set).
 
 ## Changelog
+
+- **1.4.0** — **Count sheet from a photo.** New OCR endpoint
+  (`countsheet.py`, RapidOCR) reads a photographed/scanned bay count sheet
+  into `{bay, count}` rows with a *needs review* flag; dashboard *Edit
+  targets* gets a **From photo** drop zone (red rows block saving until
+  checked), a **Print sheet** template, and a **Count sheets** audit card
+  (photo thumbnail, rows read, applied or not). HHT uploads through the
+  same endpoint. New table `count_sheets`; photos under `data/sheets/`.
+  Requirements add `rapidocr-onnxruntime`, `python-multipart`, `numpy`.
 
 - **1.3.1** — proper **bay-targets editor** on the dashboard (replaces the
   browser prompt): editable table, **CSV upload** (`Bay,Target`, header

@@ -38,6 +38,7 @@ echo [4/5] Installing server packages ...
 echo [5/5] Copying server files ...
 copy /y server.py "%OUT%\" >nul
 copy /y db.py "%OUT%\" >nul
+copy /y countsheet.py "%OUT%\" >nul
 copy /y tray.png "%OUT%\" >nul
 copy /y icon.ico "%OUT%\" >nul
 copy /y README.md "%OUT%\" >nul

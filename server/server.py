@@ -15,6 +15,7 @@ Everything is served on one port (config.json → "port", default 8765):
 Created by: DT · v1.1.0
 """
 import argparse
+import re
 import asyncio
 import csv
 import io
@@ -28,13 +29,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
 
 import db
+import countsheet
 
-SERVER_VERSION = "1.3.1"
+SERVER_VERSION = "1.4.0"
 # When frozen into an .exe (PyInstaller), config/data/log live NEXT TO THE
 # EXE (so they survive upgrades and are easy to find), while bundled
 # resources (static/) are unpacked into a temp dir exposed as sys._MEIPASS.
@@ -352,6 +354,140 @@ def server_info():
     img.save(buf)
     return {"url": url, "setupCode": setup, "qrSvg": buf.getvalue().decode("utf-8"),
             "serverName": CONFIG["serverName"], "version": SERVER_VERSION, "requiresApiKey": bool(CONFIG.get("apiKey"))}
+
+
+# ------------------------------------------------------------------ count sheets (photo → targets)
+
+SHEETS_DIR = BASE / "data" / "sheets"
+
+
+@app.post("/api/v1/count-sheet/ocr")
+async def count_sheet_ocr(request: Request, image: UploadFile = File(...), deviceId: str = Form(""), deviceName: str = Form(""),
+                          user: str = Form(""), warehouse: str = Form(""), source: str = Form("hht"),
+                          x_api_key: Optional[str] = Header(default=None)):
+    """Photo of a bay count sheet → table of {bay, count, confidence, needsReview}.
+    The sheet (photo + extracted rows) is kept for audit; nothing is applied
+    until /count-sheet/apply after the operator has reviewed the table."""
+    check_key(x_api_key)
+    data = await image.read()
+    if not data or len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image missing or larger than 20 MB")
+    try:
+        result = countsheet.parse_count_sheet(data)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not read the photo: {e}")
+    sheet_id = f"cs_{int(time.time() * 1000)}_{deviceId[-4:] or 'web'}"
+    SHEETS_DIR.mkdir(parents=True, exist_ok=True)
+    img_path = SHEETS_DIR / f"{sheet_id}.jpg"
+    thumb_path = SHEETS_DIR / f"{sheet_id}_thumb.jpg"
+    try:
+        countsheet.load_image(data).save(img_path, "JPEG", quality=88)
+        thumb_path.write_bytes(countsheet.make_thumbnail(data))
+    except Exception:  # noqa: BLE001
+        pass
+    db.add_count_sheet(sheet_id, {"device_id": deviceId, "device_name": deviceName, "user": user, "warehouse": warehouse,
+                                  "source": source, "engine": "server"}, result["rows"], str(img_path.name), str(thumb_path.name))
+    bus.publish("sheets", {"deviceName": deviceName or "dashboard", "rows": len(result["rows"])})
+    return {"ok": True, "sheetId": sheet_id, "rows": result["rows"], "fragments": result["fragments"]}
+
+
+class SheetApplyIn(BaseModel):
+    pin: str
+    sheetId: Optional[str] = None
+    rows: List[Dict[str, Any]]          # [{bay, count}] after review
+    replace: bool = False
+    deviceId: Optional[str] = None
+    deviceName: Optional[str] = None
+    user: Optional[str] = None
+    warehouse: Optional[str] = None
+    engine: Optional[str] = None        # 'device' when OCR ran on the HHT (offline fallback)
+
+
+@app.post("/api/v1/count-sheet/apply")
+def count_sheet_apply(body: SheetApplyIn):
+    """Reviewed rows → bay targets (same semantics as PUT /bay-targets)."""
+    check_pin(body.pin)
+    targets = {}
+    for r in body.rows:
+        bay = str(r.get("bay") or "").strip().upper()
+        if not bay:
+            continue
+        cnt = r.get("count")
+        targets[bay] = None if cnt in (None, "") else int(cnt)
+    if not targets:
+        raise HTTPException(status_code=400, detail="No bay rows to apply")
+    sheet_id = body.sheetId
+    if not sheet_id:
+        # device-side OCR with no photo uploaded — still record the audit row
+        sheet_id = f"cs_{int(time.time() * 1000)}_{(body.deviceId or 'dev')[-4:]}"
+        db.add_count_sheet(sheet_id, {"device_id": body.deviceId, "device_name": body.deviceName, "user": body.user,
+                                      "warehouse": body.warehouse, "source": "hht", "engine": body.engine or "device"},
+                           body.rows, None, None)
+    result = db.set_bay_targets(targets, replace=body.replace)
+    db.mark_count_sheet_applied(sheet_id, body.rows)
+    bus.publish("targets", result)
+    return {"ok": True, "targets": result, "sheetId": sheet_id}
+
+
+@app.get("/api/v1/count-sheets")
+def get_count_sheets(limit: int = 50):
+    return {"sheets": db.list_count_sheets(limit=limit)}
+
+
+@app.get("/api/v1/count-sheets/{sheet_id}/image")
+def get_count_sheet_image(sheet_id: str, thumb: int = 0):
+    row = db.get_count_sheet(sheet_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="No such sheet")
+    name = row["thumb_path"] if thumb else row["image_path"]
+    if not name:
+        raise HTTPException(status_code=404, detail="No photo stored for this sheet")
+    p = SHEETS_DIR / name
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Photo file missing")
+    return Response(content=p.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/print/count-sheet", response_class=HTMLResponse)
+def print_count_sheet(warehouse: str = "", bays: str = "", title: str = "Physical count sheet"):
+    """Printable count-sheet template. `bays` = comma list and/or ranges
+    (A01-A20,B01-B10). Empty → every bay known to this stock take."""
+    import html as _html
+    wanted = []
+    for part in [p.strip().upper() for p in bays.split(",") if p.strip()]:
+        m = re.match(r"^([A-Z])(\d{2})-([A-Z])(\d{2})$", part)
+        if m and m.group(1) == m.group(3):
+            for n in range(int(m.group(2)), int(m.group(4)) + 1):
+                wanted.append(f"{m.group(1)}{n:02d}")
+        else:
+            wanted.append(part)
+    if not wanted:
+        st = db.stats()
+        wanted = sorted(set(list(st["byBay"].keys()) + list(db.get_bay_targets().keys())))
+    rows = "".join(
+        f"<tr><td class='n'>{i + 1}</td><td class='bay'>{_html.escape(b)}</td>"
+        f"<td class='boxes'>{''.join('<span></span>' for _ in range(5))}</td><td class='rem'></td></tr>"
+        for i, b in enumerate(wanted)
+    ) or "<tr><td colspan='4'>No bays yet — add ?bays=A01-A20 to the address</td></tr>"
+    return f"""<!doctype html><html><head><meta charset='utf-8'><title>{_html.escape(title)}</title>
+<style>
+ body{{font:13px/1.3 Arial,sans-serif;color:#000;margin:18mm 14mm}} h1{{font-size:18px;margin:0 0 4px}}
+ .meta{{display:flex;gap:24px;margin:6px 0 12px;font-size:12px}} .meta span{{border-bottom:1px solid #000;min-width:160px;display:inline-block}}
+ table{{border-collapse:collapse;width:100%}} th,td{{border:1px solid #000;padding:5px 8px;height:30px}}
+ th{{background:#eee;font-size:11px;letter-spacing:.5px;text-transform:uppercase}}
+ td.n{{width:28px;text-align:center;color:#666}} td.bay{{width:90px;font:bold 20px 'Courier New',monospace;letter-spacing:1px}}
+ td.boxes{{width:230px}} td.boxes span{{display:inline-block;width:34px;height:36px;border:1.5px solid #000;margin-right:6px;vertical-align:middle}}
+ .foot{{margin-top:14px;font-size:11px;color:#444;display:flex;justify-content:space-between}}
+ .tip{{font-size:11px;color:#444;margin-bottom:8px}}
+ @media print{{.noprint{{display:none}}}}
+</style></head><body>
+<div class='noprint' style='margin-bottom:10px'><button onclick='print()'>Print</button> &nbsp; Bays: add <code>?bays=A01-A20,B01-B10</code> to the address to choose.</div>
+<h1>{_html.escape(title)}</h1>
+<div class='meta'><div>Warehouse: <span>{_html.escape(warehouse)}</span></div><div>Date: <span></span></div><div>Counted by: <span></span></div></div>
+<div class='tip'>Write ONE digit per box, right-aligned (e.g. &nbsp;[ ][ ][1][2][0]&nbsp; = 120). Leave bays with no stock blank or write 0. Photograph the whole sheet flat, in good light, with the AIS PhyStock app → Reports → Bay progress → Photo count sheet.</div>
+<table><thead><tr><th>#</th><th>Bay</th><th>Physical count (pallets)</th><th>Remarks</th></tr></thead><tbody>{rows}</tbody></table>
+<div class='foot'><span>AIS PhyStock · Physical count sheet</span><span>Supervisor signature: ____________________</span></div>
+</body></html>"""
 
 
 CSV_COLS = [

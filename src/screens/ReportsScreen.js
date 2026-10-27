@@ -6,6 +6,7 @@ import { useAppData } from '../context/AppDataContext';
 import { exportAndShareCsv, exportAndShareBackupJson, readBackupJson } from '../utils/exportFiles';
 import AdminPinModal from '../components/AdminPinModal';
 import BayTargetEditorModal from '../components/BayTargetEditorModal';
+import CountSheetModal from '../components/CountSheetModal';
 import ServerSheet, { syncStatusMeta } from '../components/ServerSheet';
 import { useSync } from '../context/SyncContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +20,7 @@ export default function ReportsScreen() {
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [targetsPinOpen, setTargetsPinOpen] = useState(false);
   const [targetsModalOpen, setTargetsModalOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const doExportCsv = async () => {
     if (scans.length === 0) {
@@ -154,6 +156,8 @@ export default function ReportsScreen() {
             ))}
           </View>
         )}
+        <ActionButton label="Photo count sheet → targets" onPress={() => setSheetOpen(true)} />
+        <Text style={[styles.blurb, { marginTop: 8 }]}>Photograph the bay count sheet; it is read into a table you check, then an admin PIN applies it as bay targets{linked ? ' on the data center' : ' on this device'}.</Text>
         {linked ? (
           <Text style={styles.blurb}>Bay targets are managed on the data center dashboard (Edit targets) while this device is linked — they refresh here automatically.</Text>
         ) : (
@@ -182,6 +186,7 @@ export default function ReportsScreen() {
       />
 
       <BayTargetEditorModal visible={targetsModalOpen} onClose={() => setTargetsModalOpen(false)} />
+      <CountSheetModal visible={sheetOpen} onClose={() => setSheetOpen(false)} />
       <ServerSheet visible={serverSheetOpen} onClose={() => setServerSheetOpen(false)} />
     </ScrollView>
   );

@@ -67,6 +67,23 @@ distribute it that way later.
 
 ## Recent changes
 
+### v1.5.0 — Photo count sheet → bay targets
+
+- **Reports → Bay progress → "Photo count sheet → targets".** Photograph
+  the paper count sheet (or pick it from the gallery). It is read into a
+  `Bay | Count` table: on the data center when linked (RapidOCR), otherwise
+  — or if the server is unreachable — on the device with ML Kit text
+  recognition, fully offline.
+- **Review before anything is applied.** Rows the reader was not sure
+  about are red and must be corrected or removed; bay codes are validated
+  (`A01` form), duplicates refused. *Apply* asks for the admin PIN, then
+  sends the reviewed rows to the data center (which keeps the photo for
+  audit and pushes the targets to every device) or, when not linked,
+  applies them to this device only. Optional *Replace all* vs merge by bay.
+- New deps: `expo-image-picker`, `expo-image-manipulator` (downscale to
+  1800 px before upload), `@react-native-ml-kit/text-recognition`. Needs a
+  new EAS build (native modules).
+
 ### v1.4.1 — Zebra: keying via predictive keyboard, and pairing camera
 
 - **Keying slipped through on Zebra.** The TC22's keyboard composes words

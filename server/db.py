@@ -95,6 +95,22 @@ CREATE TABLE IF NOT EXISTS dup_attempts (
   received_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dup_st ON dup_attempts(stocktake_id);
+CREATE TABLE IF NOT EXISTS count_sheets (
+  id           TEXT PRIMARY KEY,
+  stocktake_id INTEGER NOT NULL,
+  device_id    TEXT,
+  device_name  TEXT,
+  user         TEXT,
+  warehouse    TEXT,
+  source       TEXT,            -- 'hht' | 'dashboard'
+  engine       TEXT,            -- 'server' | 'device'
+  image_path   TEXT,
+  thumb_path   TEXT,
+  rows_json    TEXT,            -- rows as extracted (before review)
+  applied_json TEXT,            -- rows as applied after review (null until applied)
+  applied_at   TEXT,
+  received_at  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT
@@ -301,6 +317,43 @@ def list_dup_attempts(limit=200, stocktake_id=None):
     sid = stocktake_id or _sid()
     rows = c.execute("SELECT * FROM dup_attempts WHERE stocktake_id=? ORDER BY received_at DESC LIMIT ?", (sid, limit)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- count sheets (photo → targets)
+
+def add_count_sheet(sheet_id, meta, rows, image_path, thumb_path):
+    with _lock:
+        c = connect()
+        c.execute("INSERT OR REPLACE INTO count_sheets(id, stocktake_id, device_id, device_name, user, warehouse, source, engine, "
+                  "image_path, thumb_path, rows_json, received_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (sheet_id, _sid(), meta.get("device_id"), meta.get("device_name"), meta.get("user"), meta.get("warehouse"),
+                   meta.get("source"), meta.get("engine"), image_path, thumb_path, json.dumps(rows), now_iso()))
+
+
+def mark_count_sheet_applied(sheet_id, applied_rows):
+    with _lock:
+        c = connect()
+        c.execute("UPDATE count_sheets SET applied_json=?, applied_at=? WHERE id=?", (json.dumps(applied_rows), now_iso(), sheet_id))
+
+
+def list_count_sheets(limit=50, stocktake_id=None):
+    c = connect()
+    sid = stocktake_id or _sid()
+    rows = c.execute("SELECT id, device_name, user, warehouse, source, engine, thumb_path, rows_json, applied_json, applied_at, received_at "
+                     "FROM count_sheets WHERE stocktake_id=? ORDER BY received_at DESC LIMIT ?", (sid, limit)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["rows"] = json.loads(d.pop("rows_json") or "[]")
+        d["applied"] = json.loads(d.pop("applied_json") or "null")
+        out.append(d)
+    return out
+
+
+def get_count_sheet(sheet_id):
+    c = connect()
+    r = c.execute("SELECT * FROM count_sheets WHERE id=?", (sheet_id,)).fetchone()
+    return dict(r) if r else None
 
 
 def list_scans(limit=5000, stocktake_id=None):

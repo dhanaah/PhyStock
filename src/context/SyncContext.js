@@ -313,11 +313,47 @@ export function SyncProvider({ children }) {
     return url;
   }, [saveServerConfig]);
 
+  // ---- Count-sheet photo → bay targets (server OCR; the modal falls back to
+  // on-device ML Kit when this throws or the device is not linked).
+  const ocrCountSheet = useCallback(async (imageUri) => {
+    const cfg = cfgRef.current; const sess = sessionRef.current;
+    const url = normalizeUrl(cfg.url);
+    if (!url) throw new Error('Not linked to a data center');
+    const form = new FormData();
+    form.append('image', { uri: imageUri, name: 'count_sheet.jpg', type: 'image/jpeg' });
+    form.append('deviceId', cfg.deviceId || ''); form.append('deviceName', cfg.deviceName || '');
+    form.append('user', sess?.userName || ''); form.append('warehouse', sess?.warehouse || ''); form.append('source', 'hht');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
+    try {
+      const res = await fetch(`${url}/api/v1/count-sheet/ocr`, {
+        method: 'POST', body: form, signal: controller.signal,
+        headers: cfg.apiKey ? { 'x-api-key': cfg.apiKey } : undefined,
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.detail || `HTTP ${res.status}`);
+      return json; // { sheetId, rows }
+    } finally { clearTimeout(timer); }
+  }, []);
+
+  const applyCountSheet = useCallback(async ({ pin, sheetId, rows, engine, replace = false }) => {
+    const cfg = cfgRef.current; const sess = sessionRef.current;
+    const url = normalizeUrl(cfg.url);
+    if (!url) throw new Error('Not linked to a data center');
+    const json = await request(`${url}/api/v1/count-sheet/apply`, {
+      method: 'POST', apiKey: cfg.apiKey, timeoutMs: 15000,
+      body: { pin, sheetId: sheetId || null, rows, replace, engine: engine || 'server',
+        deviceId: cfg.deviceId, deviceName: cfg.deviceName, user: sess?.userName, warehouse: sess?.warehouse },
+    });
+    if (json?.targets) replaceBayTargets(json.targets);
+    return json;
+  }, [replaceBayTargets]);
+
   const value = useMemo(() => ({
     linked, baseUrl, status, lastSyncAt, lastError, serverInfo,
     pendingCount: stats.pendingSync,
-    pushNow, testConnection, linkFromSetupCode, subscribeGlobalDup, heartbeat,
-  }), [linked, baseUrl, status, lastSyncAt, lastError, serverInfo, stats.pendingSync, pushNow, testConnection, linkFromSetupCode, subscribeGlobalDup, heartbeat]);
+    pushNow, testConnection, linkFromSetupCode, subscribeGlobalDup, heartbeat, ocrCountSheet, applyCountSheet,
+  }), [linked, baseUrl, status, lastSyncAt, lastError, serverInfo, stats.pendingSync, pushNow, testConnection, linkFromSetupCode, subscribeGlobalDup, heartbeat, ocrCountSheet, applyCountSheet]);
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;
 }
