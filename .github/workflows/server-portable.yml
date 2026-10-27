@@ -27,11 +27,48 @@ jobs:
         run: echo "version=$(grep -oP 'SERVER_VERSION = \"\K[0-9.]+' server/server.py)" >> "$GITHUB_OUTPUT"
 
       - name: Build portable folder
-        shell: cmd
+        shell: pwsh
         working-directory: server
-        env:
-          CI: "true"
-        run: make_portable.bat
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PYVER = '3.12.8'
+          $OUT = 'portable/AISPhyStockServer'
+          $PYDIR = "$OUT/python"
+          New-Item -ItemType Directory -Force $PYDIR | Out-Null
+          "[1/5] Downloading Python $PYVER embeddable runtime"
+          Invoke-WebRequest "https://www.python.org/ftp/python/$PYVER/python-$PYVER-embed-amd64.zip" -OutFile python-embed.zip
+          Expand-Archive -Force python-embed.zip $PYDIR
+          Remove-Item python-embed.zip
+          "[2/5] Enabling site-packages"
+          Get-ChildItem "$PYDIR/python*._pth" | ForEach-Object { (Get-Content $_) -replace '^#\s*import site','import site' | Set-Content $_ }
+          "[3/5] Installing pip"
+          Invoke-WebRequest https://bootstrap.pypa.io/get-pip.py -OutFile get-pip.py
+          & "$PYDIR/python.exe" get-pip.py --no-warn-script-location -q
+          if ($LASTEXITCODE) { throw "get-pip failed" }
+          Remove-Item get-pip.py
+          "[4/5] Installing server packages"
+          & "$PYDIR/python.exe" -m pip install --no-warn-script-location -r requirements.txt
+          if ($LASTEXITCODE) { throw "pip install failed" }
+          "[5/5] Copying server files"
+          Copy-Item server.py,db.py,countsheet.py,tray.png,icon.ico,README.md $OUT
+          Copy-Item -Recurse -Force static "$OUT/static"
+          Set-Content "$OUT/AIS PhyStock Server.bat" -Value @'
+          @echo off
+          cd /d "%~dp0"
+          start "" "%~dp0python\pythonw.exe" server.py
+          '@
+          Set-Content "$OUT/AIS PhyStock Server (console).bat" -Value @'
+          @echo off
+          cd /d "%~dp0"
+          "%~dp0python\python.exe" server.py --no-tray
+          pause
+          '@
+          "Done. Size: {0:N0} MB" -f ((Get-ChildItem -Recurse $OUT | Measure-Object Length -Sum).Sum / 1MB)
+
+      - name: Report failure in summary
+        if: failure()
+        shell: pwsh
+        run: '"Build step failed — open the step log above for the pip/download error." >> $env:GITHUB_STEP_SUMMARY'
 
       - name: Smoke test (starts, answers /ping, stops)
         shell: pwsh
