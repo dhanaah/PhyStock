@@ -65,24 +65,28 @@ jobs:
           '@
           "Done. Size: {0:N0} MB" -f ((Get-ChildItem -Recurse $OUT | Measure-Object Length -Sum).Sum / 1MB)
 
-      - name: Report failure in summary
-        if: failure()
-        shell: pwsh
-        run: '"Build step failed — open the step log above for the pip/download error." >> $env:GITHUB_STEP_SUMMARY'
-
-      - name: Smoke test (starts, answers /ping, stops)
-        shell: pwsh
-        working-directory: server/portable/AISPhyStockServer
-        run: |
-          $p = Start-Process -FilePath "python\python.exe" -ArgumentList "server.py","--no-tray","--port","8799" -PassThru -NoNewWindow
-          Start-Sleep -Seconds 12
-          try { $r = Invoke-RestMethod http://127.0.0.1:8799/api/v1/ping; "ping ok: server $($r.serverVersion)" }
-          catch { "ping FAILED: $_"; Stop-Process -Id $p.Id -Force; exit 1 }
-          Stop-Process -Id $p.Id -Force
-
       - name: Upload portable folder
         uses: actions/upload-artifact@v4
         with:
           name: AISPhyStock-Server-portable-v${{ steps.ver.outputs.version }}
           path: server/portable/AISPhyStockServer
           retention-days: 90
+
+      - name: Smoke test (starts, answers /ping, stops)
+        shell: pwsh
+        working-directory: server/portable/AISPhyStockServer
+        run: |
+          $p = Start-Process -FilePath "python\python.exe" -ArgumentList "server.py","--no-tray","--port","8799" -PassThru -NoNewWindow -RedirectStandardOutput out.log -RedirectStandardError err.log
+          $ok = $false
+          foreach ($i in 1..45) {
+            Start-Sleep -Seconds 2
+            if ($p.HasExited) { break }
+            try { $r = Invoke-RestMethod http://127.0.0.1:8799/api/v1/ping -TimeoutSec 3; "ping ok after $($i*2)s: server $($r.serverVersion)"; $ok = $true; break } catch {}
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          "--- out.log ---"; Get-Content out.log -ErrorAction SilentlyContinue | Select-Object -Last 40
+          "--- err.log ---"; Get-Content err.log -ErrorAction SilentlyContinue | Select-Object -Last 40
+          "--- data/server.log ---"; Get-Content data/server.log -ErrorAction SilentlyContinue | Select-Object -Last 40
+          $log = ((Get-Content err.log -ErrorAction SilentlyContinue | Select-Object -Last 25) -join "`n")
+          "## Smoke test $(if($ok){'PASSED'}else{'FAILED'})`n``````text`n$log`n``````" >> $env:GITHUB_STEP_SUMMARY
+          if (-not $ok) { exit 1 }
