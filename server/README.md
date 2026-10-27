@@ -161,7 +161,7 @@ The physical count is usually written on paper first. Instead of typing it:
 
 Every photo and what was read from it is kept under `data/sheets/` and
 listed in the dashboard's **Count sheets** card for audit, with whether it
-was applied. The reader is RapidOCR (ONNX, pip-only — no extra programs to
+was applied. The reader is RapidOCR 3.x (`rapidocr` + `onnxruntime`, pip-only, Python 3.8–3.13 — no extra programs to
 install and nothing for the antivirus to block). First read after start-up
 takes a few seconds while the model loads.
 
@@ -196,7 +196,7 @@ QR includes the key automatically if set).
   checked), a **Print sheet** template, and a **Count sheets** audit card
   (photo thumbnail, rows read, applied or not). HHT uploads through the
   same endpoint. New table `count_sheets`; photos under `data/sheets/`.
-  Requirements add `rapidocr-onnxruntime`, `python-multipart`, `numpy`.
+  Requirements add `rapidocr`, `onnxruntime`, `python-multipart`, `numpy`.
 
 - **1.3.1** — proper **bay-targets editor** on the dashboard (replaces the
   browser prompt): editable table, **CSV upload** (`Bay,Target`, header

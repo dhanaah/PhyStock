@@ -27,11 +27,31 @@ _ocr = None
 
 
 def _engine():
+    """rapidocr (3.x, Python 3.8-3.13) preferred; rapidocr-onnxruntime (1.x,
+    Python <=3.12) as fallback. Both are pure pip wheels + ONNX models."""
     global _ocr
     if _ocr is None:
-        from rapidocr_onnxruntime import RapidOCR
+        import logging
+        logging.getLogger("RapidOCR").setLevel(logging.WARNING)
+        try:
+            from rapidocr import RapidOCR
+        except ImportError:
+            from rapidocr_onnxruntime import RapidOCR
         _ocr = RapidOCR()
     return _ocr
+
+
+def _run_ocr(arr):
+    """Normalise both engines' outputs to [(box, text, score), ...]."""
+    out = _engine()(arr)
+    if isinstance(out, tuple):            # rapidocr-onnxruntime: (result, elapse)
+        res = out[0] or []
+        return [(box, txt, float(score)) for box, txt, score in res]
+    boxes = getattr(out, "boxes", None)   # rapidocr 3.x: RapidOCROutput
+    if boxes is None:
+        return []
+    return [(box.tolist() if hasattr(box, "tolist") else box, txt, float(score))
+            for box, txt, score in zip(boxes, out.txts, out.scores)]
 
 
 BAY_RE = re.compile(r"^([A-Z])[\s\-_.]?([0-9OIlSBZ]{2})$")
@@ -75,9 +95,8 @@ def load_image(data: bytes, max_side=2200) -> Image.Image:
 def ocr_fragments(im: Image.Image):
     import numpy as np
     arr = np.array(im)
-    res, _ = _engine()(arr)
     frags = []
-    for box, text, score in (res or []):
+    for box, text, score in _run_ocr(arr):
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
         frags.append({

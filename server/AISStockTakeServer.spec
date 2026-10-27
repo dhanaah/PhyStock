@@ -6,7 +6,7 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files, coll
 hidden = (
     collect_submodules("uvicorn")
     + collect_submodules("pystray")
-    + collect_submodules("rapidocr_onnxruntime")
+    + collect_submodules("rapidocr")
     + collect_submodules("onnxruntime")
     + ["PIL.Image", "PIL.ImageDraw", "qrcode", "qrcode.image.svg", "tkinter", "tkinter.simpledialog",
        "anyio._backends._asyncio", "sqlite3"]
@@ -15,7 +15,7 @@ hidden = (
 a = Analysis(
     ["server.py"],
     pathex=["."],
-    datas=[("static", "static"), ("tray.png", ".")] + collect_data_files("rapidocr_onnxruntime"),
+    datas=[("static", "static"), ("tray.png", ".")] + collect_data_files("rapidocr"),
     binaries=collect_dynamic_libs("onnxruntime"),
     hiddenimports=hidden,
     hookspath=[],
