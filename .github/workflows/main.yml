@@ -47,10 +47,16 @@ jobs:
             exit 1
           fi
 
-      - uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Install EAS CLI and verify the Expo token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          npm install -g eas-cli
+          eas --version
+          if ! eas whoami; then
+            echo "::error title=Expo token rejected::EXPO_TOKEN is set but expo.dev did not accept it. Create a fresh token at https://expo.dev/accounts/dhanaah2/settings/access-tokens and update the GitHub secret (copy the whole token, no spaces)."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -61,6 +67,7 @@ jobs:
 
       - name: Build APK (EAS local)
         env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EAS_NO_VCS: 1
           EAS_LOCAL_BUILD_SKIP_CLEANUP: 0
         run: eas build --platform android --profile preview --local --non-interactive --output ./AISPhyStock-v${{ steps.ver.outputs.version }}.apk
