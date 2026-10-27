@@ -40,7 +40,9 @@ jobs:
           Expand-Archive -Force python-embed.zip $PYDIR
           Remove-Item python-embed.zip
           "[2/5] Enabling site-packages"
-          Get-ChildItem "$PYDIR/python*._pth" | ForEach-Object { (Get-Content $_) -replace '^#\s*import site','import site' | Set-Content $_ }
+          # embeddable Python ignores the script folder: put the server folder (..) on sys.path and enable site-packages
+          Get-ChildItem "$PYDIR/python*._pth" | ForEach-Object { ((Get-Content $_) -replace '^#\s*import site','import site') + '..' | Set-Content $_ }
+          Get-Content "$PYDIR/python312._pth"
           "[3/5] Installing pip"
           Invoke-WebRequest https://bootstrap.pypa.io/get-pip.py -OutFile get-pip.py
           & "$PYDIR/python.exe" get-pip.py --no-warn-script-location -q

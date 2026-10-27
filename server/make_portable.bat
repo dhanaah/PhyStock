@@ -25,7 +25,7 @@ del python-embed.zip
 
 echo [2/5] Enabling site-packages in the embeddable runtime ...
 for %%f in ("%PYDIR%\python*._pth") do (
-  powershell -NoProfile -Command "(Get-Content '%%~f') -replace '^#\s*import site','import site' | Set-Content '%%~f'"
+  powershell -NoProfile -Command "((Get-Content '%%~f') -replace '^#\s*import site','import site') + '..' | Set-Content '%%~f'"
 )
 
 echo [3/5] Installing pip ...
