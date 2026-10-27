@@ -38,6 +38,15 @@ jobs:
 
       # ubuntu-latest runners ship the Android SDK (ANDROID_HOME set); no extra setup step needed.
 
+      - name: Check EXPO_TOKEN secret
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error title=EXPO_TOKEN missing::Add the secret first: GitHub repo → Settings → Secrets and variables → Actions → New repository secret → Name EXPO_TOKEN, Value = token from https://expo.dev/accounts/dhanaah2/settings/access-tokens"
+            exit 1
+          fi
+
       - uses: expo/expo-github-action@v8
         with:
           eas-version: latest
