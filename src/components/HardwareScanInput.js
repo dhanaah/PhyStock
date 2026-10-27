@@ -48,6 +48,11 @@ const AUTO_SUBMIT_DEBOUNCE_MS = 350;
 // unusually large "inter-character delay", lower that setting to 0 in
 // its scan profile (DataWedge → Keystroke output → Inter-character delay).
 const HUMAN_TYPING_GAP_MS = 120;
+// After a rejection, the keyboard's own composition buffer may re-commit
+// the whole typed word as ONE chunk on the next key (predictive
+// keyboards — Zebra's included — do this). Any multi-character chunk
+// landing within this window of a rejection is therefore also human.
+const POST_REJECT_WINDOW_MS = 600;
 // A single character landing in an EMPTY buffer can't be judged by the
 // gap to a previous one, so it is held for this long: a scanner always
 // follows it with the rest of the code within a few ms; a lone key that
@@ -113,14 +118,23 @@ export default function HardwareScanInput({ onScan, active, onBufferChange, susp
     if (loneTimerRef.current) clearTimeout(loneTimerRef.current);
   }, []);
 
+  const lastRejectAtRef = useRef(0);
   const rejectManualInput = () => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
+    lastRejectAtRef.current = Date.now();
     valueRef.current = '';
     setValue('');
     onBufferChange?.('');
+    // Reset the keyboard's input connection too — clearing React state
+    // alone leaves a predictive keyboard's composition intact, and it
+    // would re-insert the word on the next keystroke. clear() + a
+    // blur/focus cycle drops that composition.
+    try { inputRef.current?.clear(); } catch (e) { /* ignore */ }
+    try { inputRef.current?.blur(); } catch (e) { /* ignore */ }
+    setTimeout(focusNow, 60);
     setRejected(true);
     if (rejectTimerRef.current) clearTimeout(rejectTimerRef.current);
     rejectTimerRef.current = setTimeout(() => setRejected(false), REJECT_NOTICE_MS);
@@ -189,7 +203,8 @@ export default function HardwareScanInput({ onScan, active, onBufferChange, susp
     // typing speed after the previous one. Scanner bursts never trip this.
     const isEdit = added < 0 || (added === 0 && text !== prev);
     const isSlowSingleKey = added === 1 && prev.length > 0 && gap > HUMAN_TYPING_GAP_MS;
-    if (isEdit || isSlowSingleKey) {
+    const isRecommitAfterReject = added >= 1 && prev.length === 0 && (now - lastRejectAtRef.current) < POST_REJECT_WINDOW_MS;
+    if (isEdit || isSlowSingleKey || isRecommitAfterReject) {
       rejectManualInput();
       return;
     }
@@ -230,6 +245,7 @@ export default function HardwareScanInput({ onScan, active, onBufferChange, susp
               : pulse ? 'Captured' : 'Ready — pull the trigger to scan'}
           </Text>
         </View>
+        <View style={styles.inputWrap}>
         <TextInput
           ref={inputRef}
           value={value}
@@ -242,17 +258,27 @@ export default function HardwareScanInput({ onScan, active, onBufferChange, susp
           autoCorrect={false}
           autoCapitalize="none"
           spellCheck={false}
+          autoComplete="off"
+          keyboardType="visible-password"
           importantForAutofill="no"
           returnKeyType="done"
           submitBehavior="submit"
           contextMenuHidden
           caretHidden
           showSoftInputOnFocus={keyboardAllowed}
-          placeholder="Scanned text appears here"
+          placeholder={value ? '' : 'Scanned text appears here'}
           placeholderTextColor={colors.textFaint}
           style={styles.input}
           autoFocus={active && !suspended}
         />
+        {/* The field's own text is transparent (style.input). What the
+            operator sees is this overlay, shown only once the buffer is a
+            confirmed burst (2+ characters) — so a stray human keystroke
+            never even flashes on screen before the gate discards it. */}
+        {value.length >= 2 && (
+          <View pointerEvents="none" style={styles.echo}><Text style={styles.echoText} numberOfLines={1}>{value}</Text></View>
+        )}
+        </View>
         {/* Invisible touch guard, sitting exactly on top of the field.
             A direct tap on a live TextInput repositions the cursor or
             selects text — completely fine for a normal text field, but
@@ -296,6 +322,9 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: colors.panelAlt, borderWidth: 1.5, borderColor: colors.border,
     borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 12,
-    color: colors.text, fontFamily: fonts.monoBold, fontSize: 16,
+    color: 'transparent', fontFamily: fonts.monoBold, fontSize: 16,
   },
+  inputWrap: { position: 'relative' },
+  echo: { ...StyleSheet.absoluteFillObject, paddingHorizontal: 14, justifyContent: 'center' },
+  echoText: { color: colors.text, fontFamily: fonts.monoBold, fontSize: 16 },
 });

@@ -87,6 +87,7 @@ function toServerScan(s) {
 export function SyncProvider({ children }) {
   const {
     ready, scans, stats, serverConfig, saveServerConfig, replaceBayTargets, applyScanPatches,
+    dupAttempts, markDupAttemptsSynced, setRemoteDuplicateCheck,
     userName, bay, warehouse,
   } = useAppData();
 
@@ -116,6 +117,38 @@ export function SyncProvider({ children }) {
     return () => dupListenersRef.current.delete(fn);
   }, []);
 
+  const dupsRef = useRef(dupAttempts);
+  dupsRef.current = dupAttempts;
+  const statusRef = useRef(status);
+  statusRef.current = status;
+
+  const toServerDup = (d) => ({
+    id: d.id, lpn: d.lpn ?? null, palletNo: d.palletNo ?? null, qrType: d.qrType ?? null, kind: d.kind ?? null,
+    otherDevice: d.otherDevice ?? null, otherBay: d.otherBay ?? null, raw: d.raw ?? null,
+    user: d.user ?? null, warehouse: d.warehouse ?? null, bay: d.bay ?? null, at: d.at ?? null,
+  });
+  const unsyncedDups = () => dupsRef.current.filter((d) => !d.synced).slice(0, 200).map(toServerDup);
+
+  // Pre-scan duplicate check against the data center. Installed only while
+  // linked AND currently online; a slow/failed answer (1.5 s) resolves to
+  // null so scanning never blocks on the network — the record is accepted
+  // locally and the later ACK flags it if it turns out to be a duplicate.
+  useEffect(() => {
+    if (!linked) { setRemoteDuplicateCheck(null); return undefined; }
+    setRemoteDuplicateCheck(async (lpn, qrType) => {
+      if (statusRef.current === 'offline' || statusRef.current === 'off') return null;
+      const cfg = cfgRef.current;
+      const url = normalizeUrl(cfg.url);
+      try {
+        return await request(`${url}/api/v1/lpn-check?lpn=${encodeURIComponent(lpn)}&qrType=${encodeURIComponent(qrType || '')}`,
+          { apiKey: cfg.apiKey, timeoutMs: 1500 });
+      } catch (e) {
+        return null;
+      }
+    });
+    return () => setRemoteDuplicateCheck(null);
+  }, [linked, setRemoteDuplicateCheck]);
+
   const pendingList = useCallback(
     () => scansRef.current.filter((s) => s.syncStatus !== 'synced'),
     []
@@ -131,7 +164,9 @@ export function SyncProvider({ children }) {
     if (pushingRef.current) return { ok: false, reason: 'busy' };
     const pending = pendingList();
     if (pending.length === 0) {
-      if (manual) { setStatus('online'); setLastSyncAt(new Date()); }
+      // Nothing to push — but unsynced duplicate refusals ride on the next
+      // heartbeat (every 15 s); a manual Sync sends one now.
+      if (manual) { setStatus('online'); setLastSyncAt(new Date()); heartbeat(); }
       return { ok: true, sent: 0 };
     }
     pushingRef.current = true;
@@ -147,6 +182,7 @@ export function SyncProvider({ children }) {
           body: {
             deviceId: cfg.deviceId, deviceName: cfg.deviceName, appVersion: APP_VERSION,
             scans: batch.map(toServerScan),
+            dupAttempts: i === 0 ? unsyncedDups() : [],
           },
         });
         const patches = {};
@@ -168,6 +204,7 @@ export function SyncProvider({ children }) {
         await applyScanPatches(patches);
         sent += Object.keys(patches).length;
         if (resp.bayTargets) replaceBayTargets(resp.bayTargets);
+        if (resp.dupAttemptIds?.length) markDupAttemptsSynced(resp.dupAttemptIds);
         for (const d of dups) dupListenersRef.current.forEach((fn) => { try { fn(d); } catch (e) { /* ignore */ } });
       }
       failCountRef.current = 0;
@@ -187,7 +224,7 @@ export function SyncProvider({ children }) {
     } finally {
       pushingRef.current = false;
     }
-  }, [pendingList, applyScanPatches, replaceBayTargets]);
+  }, [pendingList, applyScanPatches, replaceBayTargets, markDupAttemptsSynced]);
 
   const schedulePush = useCallback(() => {
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
@@ -211,9 +248,11 @@ export function SyncProvider({ children }) {
         body: {
           deviceId: cfg.deviceId, deviceName: cfg.deviceName, user: sess.userName, warehouse: sess.warehouse,
           bay: sess.bay, appVersion: APP_VERSION, total: sess.total, pending: sess.pending,
+          dupAttempts: unsyncedDups(),
         },
       });
       if (resp?.bayTargets) replaceBayTargets(resp.bayTargets);
+      if (resp?.dupAttemptIds?.length) markDupAttemptsSynced(resp.dupAttemptIds);
       if (resp?.stocktake) setServerInfo((prev) => ({ ...(prev || {}), stocktake: resp.stocktake }));
       setStatus((s) => (s === 'syncing' ? s : 'online'));
       setLastError(null);
@@ -222,7 +261,7 @@ export function SyncProvider({ children }) {
       setStatus((s) => (s === 'syncing' ? s : 'offline'));
       setLastError(String(e?.message || e));
     }
-  }, [replaceBayTargets, pushNow]);
+  }, [replaceBayTargets, pushNow, markDupAttemptsSynced]);
 
   // Heartbeat loop — only while linked and in the foreground.
   useEffect(() => {

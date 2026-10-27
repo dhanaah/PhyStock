@@ -48,7 +48,7 @@ const REPORT_COLUMNS = [
   ['raw', 'Raw Scan'],
 ];
 
-export function buildReportCsv(scans, bayProgress) {
+export function buildReportCsv(scans, bayProgress, dupAttempts) {
   const header = REPORT_COLUMNS.map(([, label]) => csvEscape(label)).join(',');
   const rows = scans.map((s) =>
     REPORT_COLUMNS.map(([key]) => csvEscape(
@@ -62,6 +62,17 @@ export function buildReportCsv(scans, bayProgress) {
   // Append a bay-progress summary block, if any admin targets are set —
   // keeps the physical-count vs. scanned picture inside the same file
   // the team already receives, rather than a separate report.
+  const dups = dupAttempts || [];
+  if (dups.length > 0) {
+    lines.push('');
+    lines.push('DUPLICATE SCANS REFUSED (not counted)');
+    lines.push(['Time', 'User', 'Warehouse', 'Bay', 'LPN', 'Kind', 'Already scanned by', 'Their bay', 'Raw Scan'].map(csvEscape).join(','));
+    for (const d of [...dups].reverse()) {
+      lines.push([d.atDisplay || d.at, d.user, d.warehouse, d.bay,
+        d.palletNo && d.lpn ? `${d.palletNo}${d.palletLpnDelimiter || '.'}${d.lpn}` : (d.lpn || ''),
+        d.kind, d.otherDevice || (d.kind === 'local' ? 'this device' : ''), d.otherBay || '', d.raw].map(csvEscape).join(','));
+    }
+  }
   const withTargets = (bayProgress || []).filter((p) => p.target !== null);
   if (withTargets.length > 0) {
     lines.push('');
@@ -84,9 +95,9 @@ function timestampSlug() {
 // scans are excluded so the file reflects a clean count. The full history
 // (including duplicates) stays available via the JSON backup for audit
 // or merge purposes.
-export async function exportAndShareCsv(scans, bayLabel, bayProgress) {
+export async function exportAndShareCsv(scans, bayLabel, bayProgress, dupAttempts) {
   const uniqueScans = scans.filter((s) => !s.isDuplicate);
-  const csv = buildReportCsv(uniqueScans, bayProgress);
+  const csv = buildReportCsv(uniqueScans, bayProgress, dupAttempts);
   const fileName = `PhyStock_${bayLabel || 'All'}_${timestampSlug()}.csv`.replace(/\s+/g, '_');
   const fileUri = FileSystem.documentDirectory + fileName;
   await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });

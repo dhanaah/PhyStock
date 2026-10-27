@@ -37,15 +37,23 @@ export function AppDataProvider({ children }) {
   const [scanMode, setScanModeState] = useState('camera');
   const [bayTargets, setBayTargetsState] = useState({});
   const [serverConfig, setServerConfigState] = useState({ url: '', deviceId: '', deviceName: '', apiKey: '' });
+  const [dupAttempts, setDupAttemptsState] = useState([]);
+  const dupRef = useRef([]);
+  const setDupAttempts = useCallback((next) => { dupRef.current = next; setDupAttemptsState(next); }, []);
+  // Optional pre-scan check against the data center (installed by the
+  // sync layer when a server is linked): (lpn, qrType) => Promise<hit|null>
+  const remoteCheckRef = useRef(null);
+  const setRemoteDuplicateCheck = useCallback((fn) => { remoteCheckRef.current = fn; }, []);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [sess, existingScans, mode, targets, server] = await Promise.all([
+      const [sess, existingScans, mode, targets, server, dups] = await Promise.all([
         session.getSession(), session.getScans(), session.getScanMode(), session.getBayTargets(),
-        session.getServerConfig(),
+        session.getServerConfig(), session.getDupAttempts(),
       ]);
       setServerConfigState(server);
+      setDupAttempts(dups);
       if (sess) {
         setUserName(sess.userName);
         setBay(sess.bay);
@@ -158,24 +166,61 @@ export function AppDataProvider({ children }) {
     const seenBefore = (lpn) => live.some((s) => s.lpn === lpn);
     const seenDetailed = (lpn) => live.some((s) => s.lpn === lpn && s.qrType === 'Slot1');
 
+    // DUPLICATES ARE REFUSED, NOT RECORDED. A pallet counted once stays
+    // counted once: a second scan of the same LPN — on this device, or
+    // (when the data center is reachable) on any other device — is
+    // rejected at scan time with a red strip and the duplicate tone, and
+    // logged to dupAttempts for audit. Rule (type-aware, unchanged):
+    //   LPN-only code  → duplicate if the LPN was seen at all
+    //   Detailed code  → duplicate only against an earlier Detailed scan
+    //                    (an LPN-only stock note never blocks the count)
     let isDuplicate = false;
+    let dupHit = null; // { kind:'local'|'cross-device', deviceName?, bay?, user? }
     let stockNote = null;
     if (parsed.lpn) {
       if (parsed.qrType === 'Simple') {
-        // LPN-only code — a stock/Oracle-pick style scan. Only a
-        // duplicate if this LPN has already been seen at all (detailed
-        // or simple); otherwise it's a legitimate first sighting, noted
-        // as such rather than flagged.
         isDuplicate = seenBefore(parsed.lpn);
         if (!isDuplicate) stockNote = 'LPN Stock (Oracle Pick)';
       } else if (parsed.qrType === 'Slot1') {
-        // Detailed code — only counts as a duplicate against another
-        // Detailed scan of the same LPN. An earlier LPN-only "stock"
-        // note for the same pallet doesn't block its real count.
         isDuplicate = seenDetailed(parsed.lpn);
       } else {
         isDuplicate = seenBefore(parsed.lpn);
       }
+      if (isDuplicate) {
+        const prev = live.find((s) => s.lpn === parsed.lpn);
+        dupHit = { kind: 'local', deviceName: null, bay: prev?.bay || null, user: prev?.user || null };
+      } else if (remoteCheckRef.current) {
+        try {
+          const hit = await remoteCheckRef.current(parsed.lpn, parsed.qrType);
+          if (hit && hit.exists) {
+            isDuplicate = true;
+            dupHit = { kind: 'cross-device', deviceName: hit.deviceName || null, bay: hit.bay || null, user: hit.user || null, receipt: hit.receipt || null };
+          }
+        } catch (e) { /* offline or slow — accept locally; the ACK flags it later */ }
+      }
+    }
+
+    if (isDuplicate) {
+      const attempt = {
+        id: `dup_${now.getTime()}_${Math.random().toString(36).slice(2, 8)}`,
+        at: now.toISOString(),
+        atDisplay: formatDisplayTimestamp(now),
+        user: userName, bay, warehouse,
+        lpn: parsed.lpn, palletNo: parsed.palletNo, palletLpnDelimiter: parsed.palletLpnDelimiter,
+        qrType: parsed.qrType, raw: parsed.raw,
+        kind: dupHit.kind, otherDevice: dupHit.deviceName, otherBay: dupHit.bay, otherUser: dupHit.user,
+        synced: false,
+      };
+      const nextDups = [attempt, ...dupRef.current];
+      setDupAttempts(nextDups);
+      session.saveDupAttempts(nextDups).catch(() => {});
+      return {
+        rejected: true,
+        reason: dupHit.kind,
+        attempt,
+        // a display-only preview of what was scanned (never stored)
+        scan: { ...parsed, id: attempt.id, user: userName, bay, warehouse, isDuplicate: true, rejected: true, globalDup: dupHit.kind === 'cross-device' ? dupHit : null, segment: classifySegment(parsed) },
+      };
     }
 
     const ownSegment = classifySegment(parsed);
@@ -211,6 +256,16 @@ export function AppDataProvider({ children }) {
     return scan;
   }, [userName, bay, warehouse, lpnSegmentMap, setScans]);
 
+  // Called by the sync layer after the server has stored a batch of
+  // duplicate attempts — marks them synced.
+  const markDupAttemptsSynced = useCallback(async (ids) => {
+    if (!ids || ids.length === 0) return;
+    const set = new Set(ids);
+    const next = dupRef.current.map((d) => (set.has(d.id) ? { ...d, synced: true } : d));
+    setDupAttempts(next);
+    session.saveDupAttempts(next).catch(() => {});
+  }, [setDupAttempts]);
+
   const updateScanFields = useCallback(async (id, patch) => {
     try {
       // An edit to Phy. Qty / Remarks has to reach the server too.
@@ -242,12 +297,15 @@ export function AppDataProvider({ children }) {
   const wipeAllScans = useCallback(async () => {
     await session.clearScans();
     setScans([]);
+    setDupAttempts([]);
+    session.saveDupAttempts([]).catch(() => {});
   }, []);
 
   const stats = useMemo(() => {
     const total = scans.length;
     const uniqueLpns = new Set(scans.filter((s) => s.lpn).map((s) => s.lpn)).size;
-    const duplicates = scans.filter((s) => s.isDuplicate).length;
+    // Duplicates are refused at scan time; this is the count of refusals.
+    const duplicates = dupAttempts.length;
     const byType = { Slot1: 0, Simple: 0, Other: 0, Unrecognized: 0 };
     const bySegment = { OEM: 0, OES: 0, AFM: 0, EXP: 0, TM: 0, UNSPEC: 0, UNKNOWN: 0 };
     const byBay = {};
@@ -268,7 +326,7 @@ export function AppDataProvider({ children }) {
       }
     }
     return { total, uniqueLpns, duplicates, byType, bySegment, byBay, byBayUnique, pendingSync, crossDeviceDuplicates };
-  }, [scans]);
+  }, [scans, dupAttempts]);
 
   // Admin-set expected count vs. actual (unique, non-duplicate) scans per
   // bay — surfaces as a "pending to scan" alert on the Scan screen and a
@@ -308,6 +366,9 @@ export function AppDataProvider({ children }) {
     saveServerConfig,
     replaceBayTargets,
     applyScanPatches,
+    dupAttempts,
+    markDupAttemptsSynced,
+    setRemoteDuplicateCheck,
   };
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;

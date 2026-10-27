@@ -62,7 +62,7 @@ export default function DashboardScreen() {
         <View style={styles.statsRow}>
           <StatCard label="Total Scanned" value={stats.total} icon="scan-outline" />
           <StatCard label="Unique LPNs" value={stats.uniqueLpns} accent={colors.success} icon="checkmark-circle-outline" />
-          <StatCard label="Duplicates" value={stats.duplicates} accent={stats.duplicates > 0 ? colors.danger : colors.textDim} icon="alert-circle-outline" />
+          <StatCard label="Dup. refused" value={stats.duplicates} accent={stats.duplicates > 0 ? colors.danger : colors.textDim} icon="close-circle-outline" />
         </View>
 
         <Text style={styles.sectionLabel}>By segment</Text>

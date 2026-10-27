@@ -67,6 +67,63 @@ distribute it that way later.
 
 ## Recent changes
 
+### v1.4.1 — Zebra: keying via predictive keyboard, and pairing camera
+
+- **Keying slipped through on Zebra.** The TC22's keyboard composes words
+  predictively; after the gate cleared a stray keystroke, the keyboard's
+  own composition re-committed the whole word as ONE chunk on the next
+  key — indistinguishable from a scanner burst. Now: `keyboardType=
+  "visible-password"` (Android disables composition/suggestions for it),
+  every rejection also calls `clear()` and cycles blur/focus to drop the
+  keyboard's composition, and any chunk arriving within 600 ms of a
+  rejection is treated as human.
+- **Camera couldn't detect in the pairing scanner.** Opening the Data
+  center sheet from the Scan screen started a second camera while the
+  Scan screen's camera was still live; Zebra's camera stack refuses the
+  second session. The main camera is paused while the sheet is open.
+
+### v1.4.0 — duplicates refused at scan time, content-anchored label parser, scanner-only input
+
+- **Duplicates are REFUSED, not recorded.** A second scan of a pallet
+  already counted — on this device, or (while the data center is
+  reachable) on any other device, checked live via `GET /api/v1/lpn-check`
+  before accepting — is rejected at scan time: red *REFUSED · DUPLICATE* /
+  *REFUSED · ALREADY COUNTED BY TC22-A @ A01* strip, duplicate tone,
+  error haptic, ticket marked REFUSED, no Phy.Qty/Remarks. Nothing is
+  stored in the count. Each refusal is logged (`dupAttempts`, persisted,
+  synced to the server with every push/heartbeat) so the dashboard and
+  both CSVs show an audit block. The type-aware rule is unchanged. If the
+  server check can't answer within 1.5 s the scan is accepted locally and
+  the later ACK flags it (shown as "flagged after sync" on the dashboard).
+- **Label parser rewritten to identify fields by content, not position**
+  (`qrParser.js`). The QR and the Data Matrix on one label can list
+  fields in different orders and some labels omit a field; the old
+  positional read put quantities into the item-code column depending on
+  which code decoded first. Now: the LPN segment anchors everything,
+  quantity is the short number right before it, date and plant/segment
+  are recognised by pattern, part number is the leading segment, model
+  code / work order fill from what remains, leftovers go to *Other*. GS1
+  group separators and trailing CR/LF are normalised. Verified against
+  the Bawal Data Matrix, the reference QR format, a shuffled order, a
+  missing work order and a GS1-separated string.
+- **Manual keying closed off.** The scanner field's own text is
+  transparent; what you see is an overlay shown only once a burst of 2+
+  characters has arrived, so a stray keystroke never appears at all.
+  "Enter code manually" now requires the admin PIN and closes after one
+  entry.
+- **Mode buttons are icons**: barcode = Scanner (native), camera = Camera.
+- Dashboard / Reports tiles read "Dup. refused".
+
+### v1.3.3 — "Scan QR on dashboard to link" button
+
+- The Data center sheet (cloud chip on Scan, or Reports → Data center)
+  now has an explicit **Scan QR on dashboard to link** button that opens
+  its own scanner (`LinkQrModal`): camera live and hardware trigger
+  captured at the same time, independent of the Scan screen's mode.
+  Accepts only the dashboard's setup code; links, heartbeats and pushes
+  the backlog immediately. Scanning the QR from the main Scan screen still
+  works as before.
+
 ### v1.3.2 — camera preview bleeding over the content below
 
 - The preview runs in `resizeMode="cover"`, which scales the camera image

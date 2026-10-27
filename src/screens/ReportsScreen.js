@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { PressScale, FadeRise, Collapsible } from '../components/motion';
 
 export default function ReportsScreen() {
-  const { scans, stats, bay, addManyScans, wipeAllScans, bayProgress, serverConfig } = useAppData();
+  const { scans, stats, bay, addManyScans, wipeAllScans, bayProgress, serverConfig, dupAttempts } = useAppData();
   const { status: syncStatus, pendingCount, lastSyncAt, linked } = useSync();
   const [serverSheetOpen, setServerSheetOpen] = useState(false);
   const [busy, setBusy] = useState(null);
@@ -27,7 +27,7 @@ export default function ReportsScreen() {
     }
     setBusy('csv');
     try {
-      const { exportedCount, skippedCount } = await exportAndShareCsv(scans, bay, bayProgress);
+      const { exportedCount, skippedCount } = await exportAndShareCsv(scans, bay, bayProgress, dupAttempts);
       if (skippedCount > 0) {
         setTimeout(() => Alert.alert(
           'Report ready',
@@ -89,7 +89,7 @@ export default function ReportsScreen() {
       <Text style={styles.title}>Reports</Text>
       <Text style={styles.subtitle}>
         {stats.total} scan{stats.total === 1 ? '' : 's'} logged on this device
-        {stats.duplicates > 0 ? ` · ${stats.duplicates} duplicate${stats.duplicates === 1 ? '' : 's'} flagged` : ''}.
+        {stats.duplicates > 0 ? ` · ${stats.duplicates} duplicate${stats.duplicates === 1 ? '' : 's'} refused` : ''}.
       </Text>
 
       <Section index={0} title="Data center">

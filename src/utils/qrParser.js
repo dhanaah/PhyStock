@@ -61,29 +61,92 @@ export function parseCode(rawInput) {
   }
 
   // --- Slot1: rich "@" delimited record ---
-  if (raw.includes('@')) {
-    const parts = raw.split('@').map((p) => p.trim());
-    if (parts.length >= 5) {
-      const [partNumber, modelCode, workOrder, quantity, palletLpn, plant, mfgDate, palletNoRepeat] = parts;
-      const { palletNo, lpn, delimiter } = splitPalletAndLpn(palletLpn);
+  // Fields are identified by CONTENT, not by position. The QR and the
+  // Data Matrix printed on one label do not always list the fields in the
+  // same order, and some labels omit a field entirely; a positional read
+  // put quantities into the item-code column and vice-versa depending on
+  // which code happened to decode first. Anchors:
+  //   • LPN segment  — the one containing P + 11 digits (PalletNo.LPN)
+  //   • Quantity     — the short pure number (≤6 digits) immediately
+  //                    before the LPN segment; else the first such number
+  //                    that is not the leading part number
+  //   • Mfg date     — date-shaped segment (28-Nov-2025, 2025-11-28, …)
+  //   • Plant/segment— segment carrying OEM/OES/AFM/EXP/TM or a plant code
+  //                    (TM_BWL, OEM AAU, Spares CHN …)
+  //   • Part number  — the first segment (never the LPN/date/plant)
+  //   • Model code   — the next unassigned dotted/alphanumeric code
+  //   • Work order   — the next unassigned long number (≥6 digits)
+  // Anything left over is kept in extraFields so nothing is silently lost.
+  const normalized = raw.replace(/[\x1D\x1E\x1F]/g, '@'); // GS1/DM separators
+  if (normalized.includes('@')) {
+    const parts = normalized.split('@').map((p) => p.trim());
+    while (parts.length && parts[parts.length - 1] === '') parts.pop();
+    if (parts.length >= 4) {
+      const assigned = new Array(parts.length).fill(false);
+      const take = (i) => { assigned[i] = true; return parts[i]; };
+      const isDate = (t) => /^\d{1,2}[-/. ]?[A-Za-z]{3}[-/. ]?\d{2,4}$/.test(t) || /^\d{4}-\d{2}-\d{2}$/.test(t) || /^\d{2}[-/]\d{2}[-/]\d{4}$/.test(t);
+      const isQty = (t) => /^\d{1,6}$/.test(t);
+      const isPlant = (t) => { const r = parsePlantField(t); return r.segment !== 'UNKNOWN' && r.segment !== 'UNSPEC' || !!r.plantCode; };
+
+      const li = parts.findIndex((t) => LPN_REGEX.test(t));
+      let palletNo = null, lpn = null, delimiter = '.';
+      if (li !== -1) {
+        const sp = splitPalletAndLpn(take(li));
+        palletNo = sp.palletNo; lpn = sp.lpn; delimiter = sp.delimiter || '.';
+      }
+
+      let quantity = null;
+      if (li > 0 && isQty(parts[li - 1]) && !assigned[li - 1]) quantity = take(li - 1);
+      else {
+        const qi = parts.findIndex((t, i) => i > 0 && !assigned[i] && isQty(t));
+        if (qi !== -1) quantity = take(qi);
+      }
+
+      let mfgDate = null;
+      const di = parts.findIndex((t, i) => !assigned[i] && isDate(t));
+      if (di !== -1) mfgDate = take(di);
+
+      let plant = null;
+      if (li !== -1 && li + 1 < parts.length && !assigned[li + 1] && isPlant(parts[li + 1])) plant = take(li + 1);
+      else {
+        const pi = parts.findIndex((t, i) => !assigned[i] && i !== 0 && isPlant(t));
+        if (pi !== -1) plant = take(pi);
+      }
+
+      let partNumber = null;
+      if (!assigned[0] && parts[0]) partNumber = take(0);
+
+      let modelCode = null;
+      const mi = parts.findIndex((t, i) => !assigned[i] && t && !/^\d+$/.test(t) && t !== palletNo);
+      if (mi !== -1) modelCode = take(mi);
+
+      let workOrder = null;
+      const wi = parts.findIndex((t, i) => !assigned[i] && /^\d{6,}$/.test(t));
+      if (wi !== -1) workOrder = take(wi);
+
+      // pallet number printed again at the end — same value, drop it
+      parts.forEach((t, i) => { if (!assigned[i] && palletNo && t === palletNo) assigned[i] = true; });
+      const extraFields = parts.filter((t, i) => !assigned[i] && t);
+
       return {
         ...base,
         qrType: 'Slot1',
-        partNumber: partNumber || null,
-        modelCode: modelCode || null,
-        workOrder: workOrder || null,
-        quantity: quantity || null,
-        palletNo: palletNo || palletNoRepeat || null,
-        palletLpnDelimiter: delimiter || '.',
-        plant: plant || null,
-        mfgDate: mfgDate || null,
-        lpn: lpn || palletLpn || null,
+        partNumber,
+        modelCode,
+        workOrder,
+        quantity,
+        palletNo,
+        palletLpnDelimiter: delimiter,
+        plant,
+        mfgDate,
+        lpn: lpn || null,
+        extraFields: extraFields.length ? extraFields : undefined,
       };
     }
   }
 
   // --- Simple: "PalletNo<delimiter>LPN" with no "@" ---
-  if (!raw.includes('@')) {
+  if (!normalized.includes('@')) {
     const { palletNo, lpn, delimiter } = splitPalletAndLpn(raw);
     if (palletNo && lpn) {
       return {
@@ -197,6 +260,9 @@ export function formatFieldRows(record) {
   ];
   if (record.physQty !== undefined && record.physQty !== null && record.physQty !== '') {
     rows.splice(4, 0, ['Phy. Qty', record.physQty]);
+  }
+  if (record.extraFields && record.extraFields.length) {
+    rows.push(['Other', record.extraFields.join(' · ')]);
   }
   if (record.remarks) {
     rows.push(['Remarks', record.remarks]);

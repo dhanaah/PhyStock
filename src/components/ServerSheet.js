@@ -9,6 +9,7 @@ import { colors, type as fonts, radius, space } from '../theme/theme';
 import { useAppData } from '../context/AppDataContext';
 import { useSync } from '../context/SyncContext';
 import { PressScale } from './motion';
+import LinkQrModal from './LinkQrModal';
 
 // Data-center link sheet: address, device name, Test, Sync now, status.
 // Reachable from the cloud chip in the Scan header and from Reports.
@@ -29,6 +30,7 @@ export default function ServerSheet({ visible, onClose }) {
   const [name, setName] = useState(serverConfig.deviceName || '');
   const [busy, setBusy] = useState(null);
   const [testResult, setTestResult] = useState(null);
+  const [qrOpen, setQrOpen] = useState(false);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef(null);
   const { height: screenH } = useWindowDimensions();
@@ -132,7 +134,13 @@ export default function ServerSheet({ visible, onClose }) {
               )}
             </PressScale>
 
-            <Text style={styles.label}>Server address</Text>
+            <PressScale onPress={() => setQrOpen(true)} style={[styles.btn, styles.btnQr]}>
+              <Text style={styles.btnText}>
+                <Ionicons name="qr-code-outline" size={15} color={colors.accent} /> {'  '}Scan QR on dashboard to link
+              </Text>
+            </PressScale>
+
+            <Text style={styles.label}>Server address (or type it)</Text>
             <TextInput
               value={url}
               onChangeText={(v) => { setUrl(v); setTestResult(null); }}
@@ -145,7 +153,7 @@ export default function ServerSheet({ visible, onClose }) {
               onFocus={scrollToEnd}
             />
             <Text style={styles.hint}>
-              Tip: on the Scan screen, scan the QR shown on the data center dashboard — the address fills in automatically.
+              Scanning the dashboard QR (button above, or straight from the Scan screen) fills this in automatically.
             </Text>
 
             <Text style={styles.label}>This device's name</Text>
@@ -189,6 +197,15 @@ export default function ServerSheet({ visible, onClose }) {
           </View>
         </View>
       </View>
+      <LinkQrModal
+        visible={qrOpen}
+        onClose={() => setQrOpen(false)}
+        onLinked={(linkedUrl) => {
+          setUrl(linkedUrl);
+          setTestResult({ ok: true, info: { serverName: `Linked to ${linkedUrl.replace(/^https?:\/\//, '')}` } });
+          setTimeout(() => { heartbeat(); pushNow(); }, 100);
+        }}
+      />
     </Modal>
   );
 }
@@ -224,6 +241,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13, alignItems: 'center', justifyContent: 'center',
   },
   btnPrimary: { backgroundColor: colors.accent, borderColor: colors.accent },
+  btnQr: { borderColor: colors.accent, marginTop: space(3) },
   btnDisabled: { opacity: 0.45 },
   btnText: { fontFamily: fonts.bodySemi, color: colors.text, fontSize: 13.5 },
   btnTextPrimary: { fontFamily: fonts.bodyBold, color: colors.onAccent, fontSize: 13.5 },

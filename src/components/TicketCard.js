@@ -12,6 +12,7 @@ export default function TicketCard({ scan }) {
   const meta = qrTypeMeta[scan.qrType] || qrTypeMeta.Other;
   const rows = formatFieldRows(scan);
   const isBad = scan.qrType === 'Unrecognized';
+  const refused = !!scan.rejected;
   // Same combined "PalletNo<delimiter>LPN" reconstruction used on the
   // Dashboard and in the CSV report, so the LPN shown here matches
   // exactly what's shown everywhere else — original punctuation intact.
@@ -20,7 +21,7 @@ export default function TicketCard({ scan }) {
     : (scan.lpn || 'NOT FOUND');
 
   return (
-    <View style={[styles.card, isBad && styles.cardBad]}>
+    <View style={[styles.card, (isBad || refused) && styles.cardBad]}>
       <View style={[styles.edgeStripe, { backgroundColor: (scan.isDuplicate || scan.globalDup) ? colors.danger : meta.color }]} />
       <View style={styles.perforationRow}>
         {Array.from({ length: 18 }).map((_, i) => (
@@ -30,7 +31,9 @@ export default function TicketCard({ scan }) {
 
       <View style={styles.headerRow}>
         <Badge label={meta.label} color={meta.color} soft={meta.soft} />
-        {scan.isDuplicate ? (
+        {refused ? (
+          <Badge label={scan.globalDup ? `REFUSED · ${scan.globalDup.deviceName || 'OTHER DEVICE'}` : 'REFUSED · DUPLICATE'} color={colors.danger} soft={colors.dangerSoft} />
+        ) : scan.isDuplicate ? (
           <Badge label="DUPLICATE LPN" color={colors.danger} soft={colors.dangerSoft} />
         ) : scan.globalDup ? (
           <Badge label={`ALREADY SCANNED · ${scan.globalDup.deviceName || 'OTHER DEVICE'}`} color={colors.danger} soft={colors.dangerSoft} />
@@ -60,6 +63,11 @@ export default function TicketCard({ scan }) {
       {isBad && (
         <Text style={styles.warnText}>
           No LPN pattern recognized in this code. Logged for review — verify manually.
+        </Text>
+      )}
+      {refused && (
+        <Text style={styles.warnText}>
+          This pallet is already counted{scan.globalDup ? ` by ${scan.globalDup.user || scan.globalDup.deviceName || 'another device'}${scan.globalDup.bay ? ` in ${scan.globalDup.bay}` : ''}` : ' on this device'}. Not recorded.
         </Text>
       )}
     </View>

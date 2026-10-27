@@ -21,6 +21,7 @@ import ChangeBayModal from '../components/ChangeBayModal';
 import HardwareScanInput from '../components/HardwareScanInput';
 import RawScanDebugPanel from '../components/RawScanDebugPanel';
 import ServerSheet, { syncStatusMeta } from '../components/ServerSheet';
+import AdminPinModal from '../components/AdminPinModal';
 import { useSync, isSetupCode } from '../context/SyncContext';
 import { PressScale, FadeRise, animateLayout } from '../components/motion';
 import { useScanSounds } from '../utils/useScanSounds';
@@ -70,6 +71,7 @@ export default function ScanScreen() {
   const [cameraKey, setCameraKey] = useState(0);
   const [lastScan, setLastScan] = useState(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [manualPinOpen, setManualPinOpen] = useState(false);
   const [manualValue, setManualValue] = useState('');
   const [manualError, setManualError] = useState(null);
   const [flashMsg, setFlashMsg] = useState(null);
@@ -287,14 +289,32 @@ export default function ScanScreen() {
     // app restarts. That's exactly the "scanned once then nothing"
     // symptom, so this guard always has to run regardless of outcome.
     try {
-      const scan = await recordScan(raw);
+      const result = await recordScan(raw);
+      // Duplicate → REFUSED (not stored). Show it loudly, keep the pallet
+      // guard armed so the same label isn't re-refused every frame.
+      if (result && result.rejected) {
+        const p = result.scan;
+        lastLpnRef.current = { lpn: p.lpn, qrType: p.qrType, at: Date.now() };
+        setLastScan(p);
+        setPhysQtyDraft(''); setRemarksDraft(''); setNoteSaved(false);
+        playFor('duplicate');
+        const shown = p.palletNo && p.lpn ? `${p.palletNo}${p.palletLpnDelimiter || '.'}${p.lpn}` : (p.lpn || '');
+        showOutcome('duplicate', result.reason === 'cross-device'
+          ? `REFUSED · ALREADY COUNTED BY ${result.attempt.otherDevice || 'ANOTHER DEVICE'}${result.attempt.otherBay ? ` @ ${result.attempt.otherBay}` : ''}`
+          : `REFUSED · DUPLICATE · ${shown}`);
+        if (Platform.OS !== 'web') {
+          try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); } catch (e) { Vibration.vibrate([0, 120, 60, 120, 60, 120]); }
+        }
+        return;
+      }
+      const scan = result;
       if (scan.lpn) lastLpnRef.current = { lpn: scan.lpn, qrType: scan.qrType, at: Date.now() };
       setLastScan(scan);
       setPhysQtyDraft('');
       setRemarksDraft('');
       setNoteSaved(false);
 
-      const outcome = scan.qrType === 'Unrecognized' ? 'error' : scan.isDuplicate ? 'duplicate' : 'new';
+      const outcome = scan.qrType === 'Unrecognized' ? 'error' : 'new';
       playFor(outcome);
       const shownLpn = scan.palletNo && scan.lpn
         ? `${scan.palletNo}${scan.palletLpnDelimiter || '.'}${scan.lpn}`
@@ -302,7 +322,6 @@ export default function ScanScreen() {
       showOutcome(
         outcome,
         outcome === 'error' ? 'UNREADABLE CODE'
-          : outcome === 'duplicate' ? `DUPLICATE · ${shownLpn}`
           : `${scan.stockNote ? 'LPN STOCK' : 'NEW'} · ${shownLpn}`
       );
 
@@ -365,7 +384,7 @@ export default function ScanScreen() {
     setManualError(null);
     handlePayload(value, 'manual');
     setManualValue('');
-    setManualOpen(false);
+    setManualOpen(false); // one entry per PIN
     setFlashMsg('Logged from manual entry');
     setTimeout(() => setFlashMsg(null), 1800);
   };
@@ -386,7 +405,7 @@ export default function ScanScreen() {
     }
   };
 
-  const showNoteFields = lastScan && lastScan.qrType !== 'Unrecognized';
+  const showNoteFields = lastScan && lastScan.qrType !== 'Unrecognized' && !lastScan.rejected;
 
   const currentBayProgress = bayProgress.find((p) => p.bay === bay);
 
@@ -440,6 +459,13 @@ export default function ScanScreen() {
       </View>
 
       <ChangeBayModal visible={bayModalOpen} onClose={() => setBayModalOpen(false)} />
+      <AdminPinModal
+        visible={manualPinOpen}
+        title="Manual entry"
+        message="Typing a code by hand is restricted. Enter the admin PIN to open manual entry for this one time."
+        onConfirm={() => { setManualPinOpen(false); animateLayout(); setManualOpen(true); }}
+        onCancel={() => setManualPinOpen(false)}
+      />
       <ServerSheet visible={serverSheetOpen} onClose={() => setServerSheetOpen(false)} />
 
       {/* Mode toggle + camera/hardware panel are deliberately OUTSIDE the
@@ -447,8 +473,8 @@ export default function ScanScreen() {
           preview compositing on Android — kept this structural fix even
           after switching camera libraries, since it's cheap insurance). */}
       <View style={styles.modeToggleRow}>
-        <ModeButton label="Camera" active={scanMode === 'camera'} onPress={() => setScanMode('camera')} />
-        <ModeButton label="Hardware Scanner" active={scanMode === 'hardware'} onPress={() => setScanMode('hardware')} />
+        <ModeButton icon="barcode-outline" label="Scanner" active={scanMode === 'hardware'} onPress={() => setScanMode('hardware')} />
+        <ModeButton icon="camera-outline" label="Camera" active={scanMode === 'camera'} onPress={() => setScanMode('camera')} />
       </View>
 
       {/* NOTE: the preview uses androidPreviewViewType="texture-view".
@@ -507,7 +533,10 @@ export default function ScanScreen() {
                 cameraLayoutSize ? { width: cameraLayoutSize.width, height: cameraLayoutSize.height } : null,
               ]}
               device={cameraDevice}
-              isActive={scanMode === 'camera' && isFocused && appActive}
+              // Paused while the Data-center sheet is open: its "Scan QR to
+              // link" scanner needs the camera, and a second camera session
+              // is refused on many devices (Zebra included).
+              isActive={scanMode === 'camera' && isFocused && appActive && !serverSheetOpen}
               torch={torchOn ? 'on' : 'off'}
               codeScanner={codeScanner}
               // TextureView composites inside the normal view hierarchy
@@ -624,7 +653,7 @@ export default function ScanScreen() {
         <View style={styles.counters}>
           <CounterPill index={0} label="Scanned" value={stats.total} />
           <CounterPill index={1} label="Unique LPN" value={stats.uniqueLpns} accent={colors.success} />
-          <CounterPill index={2} label="Duplicates" value={stats.duplicates} accent={stats.duplicates > 0 ? colors.danger : colors.textDim} />
+          <CounterPill index={2} label="Dup. refused" value={stats.duplicates} accent={stats.duplicates > 0 ? colors.danger : colors.textDim} />
         </View>
 
         {flashMsg && (
@@ -634,9 +663,9 @@ export default function ScanScreen() {
         )}
 
         <View style={styles.toggleLinksRow}>
-          <Pressable onPress={() => { animateLayout(); setManualOpen((v) => !v); }}>
+          <Pressable onPress={() => { if (manualOpen) { animateLayout(); setManualOpen(false); } else setManualPinOpen(true); }}>
             <Text style={styles.manualToggleText}>
-              {manualOpen ? 'Hide manual entry' : "Can't scan? Enter code manually"}
+              {manualOpen ? 'Hide manual entry' : 'Manual entry (admin PIN)'}
             </Text>
           </Pressable>
           <Pressable onPress={() => { animateLayout(); setDebugOpen((v) => !v); }}>
@@ -749,9 +778,10 @@ function CounterPill({ label, value, accent, index = 0 }) {
   );
 }
 
-function ModeButton({ label, active, onPress }) {
+function ModeButton({ icon, label, active, onPress }) {
   return (
     <PressScale onPress={onPress} containerStyle={{ flex: 1 }} style={[styles.modeBtn, active && styles.modeBtnActive]}>
+      <Ionicons name={active ? icon.replace('-outline', '') : icon} size={24} color={active ? colors.accent : colors.textDim} />
       <Text style={[styles.modeBtnText, active && styles.modeBtnTextActive]}>{label}</Text>
     </PressScale>
   );
@@ -786,7 +816,8 @@ const styles = StyleSheet.create({
 
   modeToggleRow: { flexDirection: 'row', gap: 8, paddingHorizontal: space(5), marginBottom: space(3) },
   modeBtn: {
-    flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: radius.md,
+    flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8,
+    paddingVertical: 10, borderRadius: radius.md,
     borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.panel,
   },
   modeBtnActive: { backgroundColor: colors.accentSoft, borderColor: colors.accent },

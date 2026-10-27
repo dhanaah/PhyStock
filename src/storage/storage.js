@@ -6,7 +6,17 @@ const KEYS = {
   SCAN_MODE: 'ais_stocktake_scan_mode_v1',
   BAY_TARGETS: 'ais_stocktake_bay_targets_v1',
   SERVER: 'ais_stocktake_server_v1',
+  DUP_ATTEMPTS: 'ais_stocktake_dup_attempts_v1',
 };
+
+// --- Duplicate scans refused at scan time (audit, synced to the server) ---
+export async function getDupAttempts() {
+  const raw = await AsyncStorage.getItem(KEYS.DUP_ATTEMPTS);
+  return raw ? JSON.parse(raw) : [];
+}
+export async function saveDupAttempts(list) {
+  await AsyncStorage.setItem(KEYS.DUP_ATTEMPTS, JSON.stringify(list.slice(0, 1000)));
+}
 
 // --- Data-center (server) link: url + this device's identity ---
 
