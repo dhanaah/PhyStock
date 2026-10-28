@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field
 
 import db
 
-SERVER_VERSION = "1.4.1"
+SERVER_VERSION = "1.4.2"
 # When frozen into an .exe (PyInstaller), config/data/log live NEXT TO THE
 # EXE (so they survive upgrades and are easy to find), while bundled
 # resources (static/) are unpacked into a temp dir exposed as sys._MEIPASS.
@@ -402,7 +402,9 @@ async def count_sheet_ocr(request: Request, image: UploadFile = File(...), devic
     try:
         result = countsheet.parse_count_sheet(data)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Could not read the photo: {e}")
+        logging.getLogger("phystock").exception("count-sheet OCR failed (%d bytes from %s)", len(data), deviceName or source)
+        raise HTTPException(status_code=500, detail=f"Could not read the photo: {type(e).__name__}: {e}")
+    logging.getLogger("phystock").info("count-sheet OCR: %d rows from %d text fragments (%s)", len(result["rows"]), result["fragments"], deviceName or source)
     sheet_id = f"cs_{int(time.time() * 1000)}_{deviceId[-4:] or 'web'}"
     SHEETS_DIR.mkdir(parents=True, exist_ok=True)
     img_path = SHEETS_DIR / f"{sheet_id}.jpg"

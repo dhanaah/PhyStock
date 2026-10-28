@@ -1,4 +1,4 @@
-# AIS PhyStock Server (Data Center) — v1.4.1
+# AIS PhyStock Server (Data Center) — v1.4.2
 
 The one PC on the warehouse network that every scanner pushes to. Receives
 each scan the moment it is logged, ACKs it with a receipt number, shows a
@@ -193,6 +193,10 @@ the app, or include it in the setup QR by regenerating it — the dashboard
 QR includes the key automatically if set).
 
 ## Changelog
+
+- **1.4.2** — count-sheet OCR failures are logged with the full traceback in
+  `data/server.log` and the reason is shown on the dashboard / HHT; a
+  successful read logs its row count.
 
 - **1.4.1** — **OCR engine moved out of the exe.** Apex One accepted the
   v1.3.x exe but quarantined v1.4.0's, whose body carried onnxruntime /
