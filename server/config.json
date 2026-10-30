@@ -1,7 +1,0 @@
-{
-  "port": 8765,
-  "serverName": "AIS PhyStock Data Center",
-  "adminPin": "2468",
-  "apiKey": "",
-  "openDashboardOnStart": true
-}
