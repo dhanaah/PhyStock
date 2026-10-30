@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field
 
 import db
 
-SERVER_VERSION = "1.4.2"
+SERVER_VERSION = "1.4.3"
 # When frozen into an .exe (PyInstaller), config/data/log live NEXT TO THE
 # EXE (so they survive upgrades and are easy to find), while bundled
 # resources (static/) are unpacked into a temp dir exposed as sys._MEIPASS.
@@ -417,7 +417,7 @@ async def count_sheet_ocr(request: Request, image: UploadFile = File(...), devic
     db.add_count_sheet(sheet_id, {"device_id": deviceId, "device_name": deviceName, "user": user, "warehouse": warehouse,
                                   "source": source, "engine": "server"}, result["rows"], str(img_path.name), str(thumb_path.name))
     bus.publish("sheets", {"deviceName": deviceName or "dashboard", "rows": len(result["rows"])})
-    return {"ok": True, "sheetId": sheet_id, "rows": result["rows"], "fragments": result["fragments"]}
+    return {"ok": True, "sheetId": sheet_id, "rows": result["rows"], "fragments": result["fragments"], "mode": result.get("mode", "")}
 
 
 class SheetApplyIn(BaseModel):

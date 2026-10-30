@@ -4,4 +4,5 @@
 rapidocr>=3.4
 onnxruntime>=1.17
 numpy
+opencv-python-headless>=4.8
 Pillow>=10

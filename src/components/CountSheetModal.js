@@ -60,12 +60,12 @@ export default function CountSheetModal({ visible, onClose }) {
     } catch (e) { /* keep original */ }
     setPhoto({ uri });
 
-    let result = null; let used = null; let why = '';
-    if (linked && status !== 'offline') {
+    let result = null; let used = null; let why = ''; let mode = '';
+    if (linked) {                                               // always try the data center first (it may be back)
       setNote('Reading on the data center…');
       try {
         const r = await ocrCountSheet(uri);
-        result = r.rows; used = 'server'; setSheetId(r.sheetId || null);
+        result = r.rows; used = 'server'; mode = r.mode || ''; setSheetId(r.sheetId || null);
       } catch (e) { why = e.message || 'server unreachable'; }
     }
     if (!result) {
@@ -83,7 +83,9 @@ export default function CountSheetModal({ visible, onClose }) {
     }
     setRows(result.map((r, i) => ({ key: `${i}`, bay: r.bay || '', count: r.count === null || r.count === undefined ? '' : String(r.count), review: !!r.needsReview, raw: r.raw })));
     setEngine(used);
-    setNote(used === 'server' ? 'Read on the data center' : 'Read on this device (offline reader)');
+    setNote(used === 'server'
+      ? `Read on the data center${mode === 'table' ? ' · table cells' : mode === 'freeform' ? ' · text lines' : ''}`
+      : `Read on this device (basic reader${why ? ` — data center: ${why}` : linked ? '' : ' — not linked'}). Handwriting reads better on the data center.`);
     setStep('review');
   }, [linked, status, ocrCountSheet]);
 

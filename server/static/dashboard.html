@@ -377,7 +377,7 @@ async function tgtLoadPhoto(file){
     j.rows.forEach(r=>{const bay=(r.bay||'').toUpperCase(); map.set(bay||('?'+Math.random().toString(36).slice(2,5)),{bay,target:r.count??'',review:r.needsReview,raw:r.raw});});
     tgt.rows=[...map.values()].sort((a,b)=>(a.bay||'~').localeCompare(b.bay||'~'));
     tgtRender(); const rev=j.rows.filter(r=>r.needsReview).length;
-    toast(`${j.rows.length} row${j.rows.length===1?'':'s'} read from the photo${rev?` · ${rev} marked for review`:''}`,rev>0);
+    toast(`${j.rows.length} row${j.rows.length===1?'':'s'} read from the photo${j.mode==='table'?' (table cells)':j.mode==='freeform'?' (text lines)':''}${rev?` · ${rev} marked for review`:''}`,rev>0);
     setTimeout(()=>$('#tgtRows tr.review input')?.focus(),50);
   }catch(e){toast(e.message||String(e),true)}
   finally{zone.classList.remove('busy'); note.innerHTML=old;}

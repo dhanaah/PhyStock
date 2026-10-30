@@ -71,11 +71,18 @@ export function extractRows(fragments) {
       }
     }
     let bay = null; let bayScore = 0; let count = null; let countScore = 0;
+    let run = [];                                   // one digit per box → join into one number
     for (const t of tokens) {
       const b = asBay(t.text);
-      if (b && bay === null) { bay = b; bayScore = t.score; continue; }
+      if (b && bay === null) { bay = b; bayScore = t.score; run = []; continue; }
       const c = asCount(t.text);
-      if (c !== null) { count = c; countScore = t.score; } // rightmost number wins
+      if (c !== null) {
+        if (t.text.trim().length === 1 && bay !== null) {
+          run.push(t);
+          count = Number(normDigits(run.map((x) => x.text.trim()).join('')));
+          countScore = Math.min(...run.map((x) => x.score));
+        } else { run = []; count = c; countScore = t.score; } // rightmost number wins
+      }
     }
     if (bay === null && count === null) continue;
     const conf = bay && count !== null ? Math.min(bayScore, countScore) : 0;

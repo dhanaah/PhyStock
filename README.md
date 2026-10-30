@@ -67,6 +67,13 @@ distribute it that way later.
 
 ## Recent changes
 
+### v1.5.1 — Photo count sheet: clearer fallback, boxed digits
+
+- Always tries the data center first; when it falls back to the on-device
+  reader it now says why (e.g. "data center: HTTP 500 …") and that handwriting
+  reads better on the data center (server v1.4.3+ reads table cells one by one).
+- On-device reader joins one-digit-per-box tokens into a single number.
+
 ### v1.5.0 — Photo count sheet → bay targets
 
 - **Reports → Bay progress → "Photo count sheet → targets".** Photograph
